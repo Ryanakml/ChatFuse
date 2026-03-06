@@ -1,4 +1,26 @@
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
+#!/usr/bin/env sh
 
-npx lint-staged
+# Ensure local node binaries are available
+PATH="$(pwd)/node_modules/.bin:$PATH"
+
+# Ensure Node is available in common macOS install locations
+if [ -x "/opt/homebrew/bin/node" ]; then
+	PATH="/opt/homebrew/bin:$PATH"
+fi
+
+if [ -x "/usr/local/bin/node" ]; then
+	PATH="/usr/local/bin:$PATH"
+fi
+
+# Load NVM if present and Node is still unavailable
+if ! command -v node >/dev/null 2>&1 && [ -s "$HOME/.nvm/nvm.sh" ]; then
+	export NVM_DIR="$HOME/.nvm"
+	. "$NVM_DIR/nvm.sh"
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+	echo "husky - Node.js not found in PATH. Install Node or ensure it is available to git hooks." >&2
+	exit 1
+fi
+
+lint-staged
