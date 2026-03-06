@@ -8,7 +8,7 @@
     "paths": {
       "@wa-chat/config": ["../../packages/config/src/index.ts"]
     },
-    "rootDir": "./src",
+    "rootDir": "../..",
     "outDir": "./dist",
     "sourceMap": true,
     "declaration": true,

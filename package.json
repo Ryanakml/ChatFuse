@@ -16,17 +16,19 @@
     "dev:infra": "./scripts/local-dev-up.sh",
     "dev:infra:down": "./scripts/local-dev-down.sh",
     "seed:local": "./scripts/seed-local-db.sh",
-    "prepare": "husky install"
+    "validate:migrations": "bash ./scripts/validate-migrations.sh",
+    "prepare": "husky"
   },
   "devDependencies": {
-    "@commitlint/config-conventional": "^19.9.0",
+    "@commitlint/config-conventional": "latest",
     "@eslint/js": "^9.34.0",
     "@types/express": "^5.0.6",
-    "commitlint": "^19.9.0",
+    "commitlint": "latest",
     "eslint": "^9.34.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.4.0",
     "prettier": "^3.5.3",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.32.0"
   },
