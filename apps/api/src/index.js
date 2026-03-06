@@ -2,10 +2,159 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { validateEnv } from '@wa-chat/config';
 import { pathToFileURL } from 'node:url';
-import { createHmac, timingSafeEqual } from 'node:crypto';
-export const createApp = (runtimeEnv) => {
+import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
+import { Queue } from 'bullmq';
+import { createClient } from 'redis';
+const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24;
+const INGRESS_QUEUE_NAME = 'wa-webhook-ingress';
+const INGRESS_JOB_NAME = 'ingress-webhook-event';
+const parseNumber = (value, fallback) => {
+    if (!value) {
+        return fallback;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+const asRecord = (value) => {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        return value;
+    }
+    return null;
+};
+const stableStringify = (value) => {
+    if (value === null) {
+        return 'null';
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
+    }
+    switch (typeof value) {
+        case 'string':
+            return JSON.stringify(value);
+        case 'number':
+        case 'boolean':
+            return String(value);
+        case 'object': {
+            const record = asRecord(value);
+            if (!record) {
+                return 'null';
+            }
+            const keys = Object.keys(record).sort();
+            const entries = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+            return `{${entries.join(',')}}`;
+        }
+        default:
+            return 'null';
+    }
+};
+const extractWebhookEventKey = (payload) => {
+    const eventParts = [];
+    const entries = Array.isArray(payload.entry) ? payload.entry : [];
+    for (const entry of entries) {
+        const entryRecord = asRecord(entry);
+        if (!entryRecord) {
+            continue;
+        }
+        const changes = Array.isArray(entryRecord.changes) ? entryRecord.changes : [];
+        for (const change of changes) {
+            const changeRecord = asRecord(change);
+            const valueRecord = changeRecord ? asRecord(changeRecord.value) : null;
+            if (!valueRecord) {
+                continue;
+            }
+            const messages = Array.isArray(valueRecord.messages) ? valueRecord.messages : [];
+            for (const message of messages) {
+                const messageRecord = asRecord(message);
+                if (messageRecord && typeof messageRecord.id === 'string') {
+                    eventParts.push(`message:${messageRecord.id}`);
+                }
+            }
+            const statuses = Array.isArray(valueRecord.statuses) ? valueRecord.statuses : [];
+            for (const status of statuses) {
+                const statusRecord = asRecord(status);
+                if (statusRecord && typeof statusRecord.id === 'string') {
+                    eventParts.push(`status:${statusRecord.id}`);
+                }
+            }
+        }
+    }
+    if (eventParts.length > 0) {
+        return eventParts.sort().join('|');
+    }
+    // Fallback keeps idempotency deterministic even for unexpected payload variants.
+    const digest = createHash('sha256').update(stableStringify(payload)).digest('hex');
+    return `payload:${digest}`;
+};
+const coerceJsonValue = (value) => {
+    if (value === null ||
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean') {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => coerceJsonValue(entry));
+    }
+    const record = asRecord(value);
+    if (!record) {
+        return null;
+    }
+    const jsonObject = {};
+    for (const [key, entry] of Object.entries(record)) {
+        jsonObject[key] = coerceJsonValue(entry);
+    }
+    return jsonObject;
+};
+export const createRedisIdempotencyStore = (redisUrl) => {
+    const redis = createClient({ url: redisUrl });
+    let connectPromise = null;
+    const ensureConnected = async () => {
+        if (redis.isOpen) {
+            return;
+        }
+        if (!connectPromise) {
+            connectPromise = redis
+                .connect()
+                .then(() => undefined)
+                .finally(() => {
+                connectPromise = null;
+            });
+        }
+        await connectPromise;
+    };
+    return {
+        setIfNotExists: async (key, ttlSeconds) => {
+            await ensureConnected();
+            const result = await redis.set(key, '1', {
+                EX: ttlSeconds,
+                NX: true,
+            });
+            return result === 'OK';
+        },
+        delete: async (key) => {
+            await ensureConnected();
+            await redis.del(key);
+        },
+    };
+};
+export const createBullMqIngressQueue = (redisUrl) => {
+    const queue = new Queue(INGRESS_QUEUE_NAME, {
+        connection: { url: redisUrl },
+        defaultJobOptions: {
+            removeOnComplete: true,
+            removeOnFail: false,
+        },
+    });
+    return {
+        enqueue: async (job) => {
+            await queue.add(INGRESS_JOB_NAME, job);
+        },
+    };
+};
+export const createApp = (runtimeEnv, options = {}) => {
     const env = validateEnv(runtimeEnv);
     const app = express();
+    const isDevelopment = runtimeEnv.NODE_ENV === 'development';
     const allowInsecureHttp = runtimeEnv.ALLOW_INSECURE_HTTP === 'true';
     const trustProxy = runtimeEnv.TRUST_PROXY === 'true';
     const adminIpAllowlist = runtimeEnv.ADMIN_IP_ALLOWLIST
@@ -13,18 +162,15 @@ export const createApp = (runtimeEnv) => {
             .map((value) => value.trim())
             .filter(Boolean)
         : [];
-    const parseNumber = (value, fallback) => {
-        if (!value) {
-            return fallback;
-        }
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : fallback;
-    };
     const adminRateLimitWindowMs = parseNumber(runtimeEnv.ADMIN_RATE_LIMIT_WINDOW_MS, 60_000);
     const adminRateLimitMax = parseNumber(runtimeEnv.ADMIN_RATE_LIMIT_MAX, 30);
     const webhookBodyLimit = runtimeEnv.WEBHOOK_BODY_LIMIT || '256kb';
     const webhookRateLimitWindowMs = parseNumber(runtimeEnv.WEBHOOK_RATE_LIMIT_WINDOW_MS, 60_000);
     const webhookRateLimitMax = parseNumber(runtimeEnv.WEBHOOK_RATE_LIMIT_MAX, 120);
+    const idempotencyTtlSeconds = options.idempotencyTtlSeconds ??
+        parseNumber(runtimeEnv.WEBHOOK_IDEMPOTENCY_TTL_SECONDS, DEFAULT_IDEMPOTENCY_TTL_SECONDS);
+    const idempotencyStore = options.idempotencyStore ?? createRedisIdempotencyStore(env.REDIS_URL);
+    const ingressQueue = options.ingressQueue ?? createBullMqIngressQueue(env.REDIS_URL);
     const adminAuthHeader = runtimeEnv.ADMIN_AUTH_HEADER?.trim() || 'x-wa-user';
     const adminRoleHeader = runtimeEnv.ADMIN_ROLE_HEADER?.trim() || 'x-wa-role';
     const adminAllowedRoles = runtimeEnv.ADMIN_ALLOWED_ROLES
@@ -91,7 +237,7 @@ export const createApp = (runtimeEnv) => {
         next();
     };
     app.use((req, res, next) => {
-        if (allowInsecureHttp || isHttpsRequest(req)) {
+        if (isDevelopment || allowInsecureHttp || isHttpsRequest(req)) {
             next();
             return;
         }
@@ -143,7 +289,7 @@ export const createApp = (runtimeEnv) => {
         }
         res.status(403).json({ error: 'Verification failed' });
     });
-    app.post('/webhook', parseWebhookJson, applyWebhookRateLimit, (req, res) => {
+    app.post('/webhook', parseWebhookJson, applyWebhookRateLimit, async (req, res) => {
         const webhookRequest = req;
         const signatureHeader = req.header('x-hub-signature-256') || '';
         if (!webhookRequest.rawBody || !signatureHeader) {
@@ -160,6 +306,25 @@ export const createApp = (runtimeEnv) => {
             Array.isArray(payload) ||
             typeof payload.object !== 'string') {
             sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid webhook payload');
+            return;
+        }
+        const eventKey = extractWebhookEventKey(payload);
+        const dedupeKey = `idempotency:webhook:${eventKey}`;
+        const firstSeen = await idempotencyStore.setIfNotExists(dedupeKey, idempotencyTtlSeconds);
+        if (!firstSeen) {
+            res.status(200).json({ ok: true });
+            return;
+        }
+        try {
+            await ingressQueue.enqueue({
+                eventKey,
+                payload: coerceJsonValue(payload),
+                receivedAt: new Date().toISOString(),
+            });
+        }
+        catch {
+            await idempotencyStore.delete(dedupeKey);
+            sendWebhookError(res, 503, 'ENQUEUE_FAILED', 'Failed to enqueue webhook event');
             return;
         }
         res.status(200).json({ ok: true });

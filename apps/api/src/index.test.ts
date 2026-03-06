@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import type { IdempotencyStore, IngressJobPayload, IngressQueue } from './index.js';
 import { createApp } from './index.js';
 
 const color = {
@@ -11,6 +12,12 @@ const color = {
 };
 
 let failed = 0;
+
+type TestIngressDependencies = {
+  idempotencyStore: IdempotencyStore;
+  ingressQueue: IngressQueue;
+  enqueuedJobs: IngressJobPayload[];
+};
 
 async function runTest(name: string, fn: () => Promise<void> | void) {
   process.stdout.write(`${color.cyan}RUN${color.reset} ${name} ... `);
@@ -54,27 +61,56 @@ const signBody = (body: string, secret: string) => {
 
 async function withServer<T>(
   envOverrides: Partial<NodeJS.ProcessEnv>,
-  fn: (baseUrl: string, env: NodeJS.ProcessEnv) => Promise<T>,
+  fn: (baseUrl: string, env: NodeJS.ProcessEnv, deps: TestIngressDependencies) => Promise<T>,
 ) {
   const env = {
     ...buildTestEnv(),
     ...envOverrides,
   };
 
-  const app = createApp(env);
+  const enqueuedJobs: IngressJobPayload[] = [];
+  const seenIdempotencyKeys = new Set<string>();
+
+  const deps: TestIngressDependencies = {
+    idempotencyStore: {
+      setIfNotExists: async (key) => {
+        if (seenIdempotencyKeys.has(key)) {
+          return false;
+        }
+
+        seenIdempotencyKeys.add(key);
+        return true;
+      },
+      delete: async (key) => {
+        seenIdempotencyKeys.delete(key);
+      },
+    },
+    ingressQueue: {
+      enqueue: async (job) => {
+        enqueuedJobs.push(job);
+      },
+    },
+    enqueuedJobs,
+  };
+
+  const app = createApp(env, {
+    idempotencyStore: deps.idempotencyStore,
+    ingressQueue: deps.ingressQueue,
+    idempotencyTtlSeconds: 300,
+  });
   const server = app.listen(0);
 
   try {
     const address = server.address();
     assert.ok(address && typeof address === 'object' && 'port' in address);
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    return await fn(baseUrl, env);
+    return await fn(baseUrl, env, deps);
   } finally {
     server.close();
   }
 }
 
-console.log(`${color.cyan}API Endpoint Tests (E1 + E2)${color.reset}\n`);
+console.log(`${color.cyan}API Endpoint Tests (E1 + E2 + E3)${color.reset}\n`);
 
 try {
   await runTest('GET /health returns 200', async () => {
@@ -107,19 +143,22 @@ try {
     );
   });
 
-  await runTest('HTTP requests are blocked outside development when ALLOW_INSECURE_HTTP is false', async () => {
-    await withServer(
-      {
-        NODE_ENV: 'production',
-        ALLOW_INSECURE_HTTP: 'false',
-      },
-      async (baseUrl) => {
-        const res = await fetch(`${baseUrl}/health`);
-        assert.equal(res.status, 426);
-        assert.deepEqual(await res.json(), { error: 'HTTPS required' });
-      },
-    );
-  });
+  await runTest(
+    'HTTP requests are blocked outside development when ALLOW_INSECURE_HTTP is false',
+    async () => {
+      await withServer(
+        {
+          NODE_ENV: 'production',
+          ALLOW_INSECURE_HTTP: 'false',
+        },
+        async (baseUrl) => {
+          const res = await fetch(`${baseUrl}/health`);
+          assert.equal(res.status, 426);
+          assert.deepEqual(await res.json(), { error: 'HTTPS required' });
+        },
+      );
+    },
+  );
 
   await runTest('Webhook verification success', async () => {
     await withServer({}, async (baseUrl) => {
@@ -166,7 +205,7 @@ try {
   });
 
   await runTest('POST /webhook accepts valid signed payload', async () => {
-    await withServer({}, async (baseUrl, env) => {
+    await withServer({}, async (baseUrl, env, deps) => {
       const payload = JSON.stringify({ object: 'whatsapp_business_account' });
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
@@ -179,6 +218,8 @@ try {
 
       assert.equal(res.status, 200);
       assert.deepEqual(await res.json(), { ok: true });
+      assert.equal(deps.enqueuedJobs.length, 1);
+      assert.equal(typeof deps.enqueuedJobs[0]?.eventKey, 'string');
     });
   });
 
@@ -321,6 +362,45 @@ try {
         });
       },
     );
+  });
+
+  await runTest('POST /webhook dedupes duplicate events and enqueues once', async () => {
+    await withServer({}, async (baseUrl, env, deps) => {
+      const payload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [{ id: 'wamid-123' }],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const headers = {
+        'content-type': 'application/json',
+        'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+      };
+
+      const first = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+      const second = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(deps.enqueuedJobs.length, 1);
+      assert.equal(deps.enqueuedJobs[0]?.eventKey, 'message:wamid-123');
+    });
   });
 } finally {
   console.log('\n' + '-'.repeat(40));

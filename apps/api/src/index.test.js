@@ -51,19 +51,45 @@ async function withServer(envOverrides, fn) {
         ...buildTestEnv(),
         ...envOverrides,
     };
-    const app = createApp(env);
+    const enqueuedJobs = [];
+    const seenIdempotencyKeys = new Set();
+    const deps = {
+        idempotencyStore: {
+            setIfNotExists: async (key) => {
+                if (seenIdempotencyKeys.has(key)) {
+                    return false;
+                }
+                seenIdempotencyKeys.add(key);
+                return true;
+            },
+            delete: async (key) => {
+                seenIdempotencyKeys.delete(key);
+            },
+        },
+        ingressQueue: {
+            enqueue: async (job) => {
+                enqueuedJobs.push(job);
+            },
+        },
+        enqueuedJobs,
+    };
+    const app = createApp(env, {
+        idempotencyStore: deps.idempotencyStore,
+        ingressQueue: deps.ingressQueue,
+        idempotencyTtlSeconds: 300,
+    });
     const server = app.listen(0);
     try {
         const address = server.address();
         assert.ok(address && typeof address === 'object' && 'port' in address);
         const baseUrl = `http://127.0.0.1:${address.port}`;
-        return await fn(baseUrl, env);
+        return await fn(baseUrl, env, deps);
     }
     finally {
         server.close();
     }
 }
-console.log(`${color.cyan}API Endpoint Tests (E1 + E2)${color.reset}\n`);
+console.log(`${color.cyan}API Endpoint Tests (E1 + E2 + E3)${color.reset}\n`);
 try {
     await runTest('GET /health returns 200', async () => {
         await withServer({}, async (baseUrl) => {
@@ -77,6 +103,26 @@ try {
             const res = await fetch(`${baseUrl}/ready`);
             assert.equal(res.status, 200);
             assert.deepEqual(await res.json(), { ok: true });
+        });
+    });
+    await runTest('HTTP requests pass in development without ALLOW_INSECURE_HTTP', async () => {
+        await withServer({
+            NODE_ENV: 'development',
+            ALLOW_INSECURE_HTTP: 'false',
+        }, async (baseUrl) => {
+            const res = await fetch(`${baseUrl}/health`);
+            assert.equal(res.status, 200);
+            assert.deepEqual(await res.json(), { ok: true });
+        });
+    });
+    await runTest('HTTP requests are blocked outside development when ALLOW_INSECURE_HTTP is false', async () => {
+        await withServer({
+            NODE_ENV: 'production',
+            ALLOW_INSECURE_HTTP: 'false',
+        }, async (baseUrl) => {
+            const res = await fetch(`${baseUrl}/health`);
+            assert.equal(res.status, 426);
+            assert.deepEqual(await res.json(), { error: 'HTTPS required' });
         });
     });
     await runTest('Webhook verification success', async () => {
@@ -108,7 +154,7 @@ try {
         });
     });
     await runTest('POST /webhook accepts valid signed payload', async () => {
-        await withServer({}, async (baseUrl, env) => {
+        await withServer({}, async (baseUrl, env, deps) => {
             const payload = JSON.stringify({ object: 'whatsapp_business_account' });
             const res = await fetch(`${baseUrl}/webhook`, {
                 method: 'POST',
@@ -120,6 +166,8 @@ try {
             });
             assert.equal(res.status, 200);
             assert.deepEqual(await res.json(), { ok: true });
+            assert.equal(deps.enqueuedJobs.length, 1);
+            assert.equal(typeof deps.enqueuedJobs[0]?.eventKey, 'string');
         });
     });
     await runTest('POST /webhook rejects missing signature header', async () => {
@@ -245,6 +293,42 @@ try {
                     message: 'Rate limit exceeded',
                 },
             });
+        });
+    });
+    await runTest('POST /webhook dedupes duplicate events and enqueues once', async () => {
+        await withServer({}, async (baseUrl, env, deps) => {
+            const payload = JSON.stringify({
+                object: 'whatsapp_business_account',
+                entry: [
+                    {
+                        changes: [
+                            {
+                                value: {
+                                    messages: [{ id: 'wamid-123' }],
+                                },
+                            },
+                        ],
+                    },
+                ],
+            });
+            const headers = {
+                'content-type': 'application/json',
+                'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET),
+            };
+            const first = await fetch(`${baseUrl}/webhook`, {
+                method: 'POST',
+                headers,
+                body: payload,
+            });
+            const second = await fetch(`${baseUrl}/webhook`, {
+                method: 'POST',
+                headers,
+                body: payload,
+            });
+            assert.equal(first.status, 200);
+            assert.equal(second.status, 200);
+            assert.equal(deps.enqueuedJobs.length, 1);
+            assert.equal(deps.enqueuedJobs[0]?.eventKey, 'message:wamid-123');
         });
     });
 }
