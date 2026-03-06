@@ -16,6 +16,7 @@
     "dev:infra": "./scripts/local-dev-up.sh",
     "dev:infra:down": "./scripts/local-dev-down.sh",
     "seed:local": "./scripts/seed-local-db.sh",
+    "validate:migrations": "bash ./scripts/validate-migrations.sh",
     "prepare": "husky"
   },
   "devDependencies": {
