@@ -25,6 +25,7 @@ export const OPTIONAL_ENV_VARS = [
     'ADMIN_AUTH_HEADER',
     'ADMIN_ROLE_HEADER',
     'ADMIN_ALLOWED_ROLES',
+    'WEBHOOK_IDEMPOTENCY_TTL_SECONDS',
 ];
 export const validateEnv = (env) => {
     const missing = REQUIRED_ENV_VARS.filter((key) => {

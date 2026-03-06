@@ -9,6 +9,8 @@ const allowedRoles = (process.env.DASHBOARD_ALLOWED_ROLES ?? 'admin')
   .map((value) => value.trim())
   .filter(Boolean);
 
+const publicRoutes = ['/health'];
+
 const isSecureRequest = (request: NextRequest) => {
   const forwardedProto = request.headers.get('x-forwarded-proto');
   if (forwardedProto) {
@@ -18,7 +20,15 @@ const isSecureRequest = (request: NextRequest) => {
 };
 
 export const middleware = (request: NextRequest) => {
-  if (!allowInsecureHttp && !isSecureRequest(request)) {
+  const pathname = request.nextUrl.pathname;
+
+  if (publicRoutes.some((route) => pathname.startsWith(route))) {
+    return NextResponse.next();
+  }
+
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction && !allowInsecureHttp && !isSecureRequest(request)) {
     const url = request.nextUrl.clone();
     url.protocol = 'https:';
     return NextResponse.redirect(url);

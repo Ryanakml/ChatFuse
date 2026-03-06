@@ -4,11 +4,7 @@
     "module": "nodenext",
     "target": "esnext",
     "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@wa-chat/config": ["../../packages/config/src/index.ts"]
-    },
-    "rootDir": "../..",
+    "rootDir": "./src",
     "outDir": "./dist",
     "sourceMap": true,
     "declaration": true,

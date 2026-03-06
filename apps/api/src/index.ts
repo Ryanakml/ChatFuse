@@ -1,18 +1,186 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { validateEnv } from '@wa-chat/config';
+import { pathToFileURL } from 'node:url';
+import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { Queue } from 'bullmq';
+import { createClient } from 'redis';
 
-dotenv.config();
-const env = validateEnv(process.env);
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-const app = express();
-const allowInsecureHttp = process.env.ALLOW_INSECURE_HTTP === 'true';
-const trustProxy = process.env.TRUST_PROXY === 'true';
-const adminIpAllowlist = process.env.ADMIN_IP_ALLOWLIST
-  ? process.env.ADMIN_IP_ALLOWLIST.split(',')
-      .map((value: string) => value.trim())
-      .filter(Boolean)
-  : [];
+export type IngressJobPayload = {
+  eventKey: string;
+  payload: JsonValue;
+  receivedAt: string;
+};
+
+export type IngressTraceContext = {
+  traceId: string;
+  correlationId: string;
+  method: string;
+  path: string;
+  sourceIp: string;
+  receivedAt: string;
+};
+
+type VerificationFailureReason = 'missing_signature' | 'invalid_signature';
+type MalformedPayloadReason = 'invalid_structure' | 'invalid_json' | 'payload_too_large';
+
+export interface IngressObservability {
+  onIngressStart: (context: IngressTraceContext) => void;
+  onVerificationFailure: (
+    context: IngressTraceContext,
+    details: { reason: VerificationFailureReason },
+  ) => void;
+  onMalformedPayload: (
+    context: IngressTraceContext,
+    details: { reason: MalformedPayloadReason },
+  ) => void;
+  onDuplicateHit: (context: IngressTraceContext, details: { eventKey: string }) => void;
+  onEnqueueSuccess: (context: IngressTraceContext, details: { eventKey: string }) => void;
+  onEnqueueFailure: (
+    context: IngressTraceContext,
+    details: { eventKey: string; errorCode: string },
+  ) => void;
+}
+
+type WebhookRequest = express.Request & {
+  rawBody?: Buffer;
+  ingressContext?: IngressTraceContext;
+};
+
+export interface IdempotencyStore {
+  setIfNotExists: (key: string, ttlSeconds: number) => Promise<boolean>;
+  delete: (key: string) => Promise<void>;
+}
+
+export interface IngressQueue {
+  enqueue: (job: IngressJobPayload) => Promise<void>;
+}
+
+type AppDependencies = {
+  idempotencyStore: IdempotencyStore;
+  ingressQueue: IngressQueue;
+  idempotencyTtlSeconds: number;
+  observability: IngressObservability;
+};
+
+type AppOptions = Partial<AppDependencies>;
+
+const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24;
+const INGRESS_QUEUE_NAME = 'wa-webhook-ingress';
+const INGRESS_JOB_NAME = 'ingress-webhook-event';
+
+type IngressMetrics = {
+  total: number;
+  verificationFailures: number;
+  malformedPayloads: number;
+  duplicateHits: number;
+  enqueueSuccesses: number;
+  enqueueFailures: number;
+};
+
+const createTraceId = () => randomBytes(16).toString('hex');
+const createCorrelationId = () => randomBytes(12).toString('hex');
+
+const computeRate = (count: number, total: number) => {
+  if (total <= 0) {
+    return 0;
+  }
+
+  return Number((count / total).toFixed(4));
+};
+
+const logObservabilityEvent = (
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  context: IngressTraceContext,
+  attributes: Record<string, unknown>,
+) => {
+  const message = JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    event,
+    traceId: context.traceId,
+    correlationId: context.correlationId,
+    method: context.method,
+    path: context.path,
+    sourceIp: context.sourceIp,
+    ...attributes,
+  });
+
+  if (level === 'error') {
+    console.error(message);
+    return;
+  }
+
+  if (level === 'warn') {
+    console.warn(message);
+    return;
+  }
+
+  console.log(message);
+};
+
+const createDefaultIngressObservability = (): IngressObservability => {
+  const metrics: IngressMetrics = {
+    total: 0,
+    verificationFailures: 0,
+    malformedPayloads: 0,
+    duplicateHits: 0,
+    enqueueSuccesses: 0,
+    enqueueFailures: 0,
+  };
+
+  return {
+    onIngressStart: (context) => {
+      metrics.total += 1;
+      logObservabilityEvent('info', 'webhook.ingress.start', context, {
+        totalIngressRequests: metrics.total,
+      });
+    },
+    onVerificationFailure: (context, details) => {
+      metrics.verificationFailures += 1;
+      logObservabilityEvent('warn', 'webhook.verification.failure', context, {
+        reason: details.reason,
+        verificationFailureCount: metrics.verificationFailures,
+      });
+    },
+    onMalformedPayload: (context, details) => {
+      metrics.malformedPayloads += 1;
+      logObservabilityEvent('warn', 'webhook.payload.malformed', context, {
+        reason: details.reason,
+        malformedPayloadCount: metrics.malformedPayloads,
+        malformedPayloadRate: computeRate(metrics.malformedPayloads, metrics.total),
+      });
+    },
+    onDuplicateHit: (context, details) => {
+      metrics.duplicateHits += 1;
+      logObservabilityEvent('info', 'webhook.duplicate.hit', context, {
+        eventKey: details.eventKey,
+        duplicateHitCount: metrics.duplicateHits,
+      });
+    },
+    onEnqueueSuccess: (context, details) => {
+      metrics.enqueueSuccesses += 1;
+      logObservabilityEvent('info', 'webhook.enqueue.success', context, {
+        eventKey: details.eventKey,
+        enqueueSuccessCount: metrics.enqueueSuccesses,
+        enqueueFailureCount: metrics.enqueueFailures,
+      });
+    },
+    onEnqueueFailure: (context, details) => {
+      metrics.enqueueFailures += 1;
+      logObservabilityEvent('error', 'webhook.enqueue.failure', context, {
+        eventKey: details.eventKey,
+        errorCode: details.errorCode,
+        enqueueSuccessCount: metrics.enqueueSuccesses,
+        enqueueFailureCount: metrics.enqueueFailures,
+      });
+    },
+  };
+};
+
 const parseNumber = (value: string | undefined, fallback: number) => {
   if (!value) {
     return fallback;
@@ -22,86 +190,503 @@ const parseNumber = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const adminRateLimitWindowMs = parseNumber(process.env.ADMIN_RATE_LIMIT_WINDOW_MS, 60_000);
-const adminRateLimitMax = parseNumber(process.env.ADMIN_RATE_LIMIT_MAX, 30);
-const adminAuthHeader = process.env.ADMIN_AUTH_HEADER?.trim() || 'x-wa-user';
-const adminRoleHeader = process.env.ADMIN_ROLE_HEADER?.trim() || 'x-wa-role';
-const adminAllowedRoles = process.env.ADMIN_ALLOWED_ROLES
-  ? process.env.ADMIN_ALLOWED_ROLES.split(',')
-      .map((value: string) => value.trim())
-      .filter(Boolean)
-  : ['admin'];
-const adminRateLimitStore = new Map<string, { count: number; resetAt: number }>();
-
-app.set('trust proxy', trustProxy ? 1 : false);
-app.use(express.json());
-
-const normalizeIp = (ip: string) => ip.replace(/^::ffff:/, '');
-
-const isHttpsRequest = (req: express.Request) => {
-  const forwardedProto = req.headers['x-forwarded-proto'];
-  if (typeof forwardedProto === 'string') {
-    const proto = forwardedProto.split(',')[0] ?? '';
-    return proto.trim() === 'https';
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
   }
-  return req.secure;
+
+  return null;
 };
 
-app.use((req, res, next) => {
-  if (allowInsecureHttp || isHttpsRequest(req)) {
-    next();
-    return;
+const stableStringify = (value: unknown): string => {
+  if (value === null) {
+    return 'null';
   }
 
-  res.status(426).json({ error: 'HTTPS required' });
-});
-
-const enforceAdminAccess: express.RequestHandler = (req, res, next) => {
-  const ip = normalizeIp(req.ip || '');
-  if (adminIpAllowlist.length > 0 && !adminIpAllowlist.includes(ip)) {
-    res.status(403).json({ error: 'IP not allowed' });
-    return;
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(',')}]`;
   }
 
-  const now = Date.now();
-  const current = adminRateLimitStore.get(ip);
-  if (!current || now >= current.resetAt) {
-    adminRateLimitStore.set(ip, { count: 1, resetAt: now + adminRateLimitWindowMs });
-  } else {
-    current.count += 1;
-    if (current.count > adminRateLimitMax) {
-      res.status(429).json({ error: 'Rate limit exceeded' });
-      return;
+  switch (typeof value) {
+    case 'string':
+      return JSON.stringify(value);
+    case 'number':
+    case 'boolean':
+      return String(value);
+    case 'object': {
+      const record = asRecord(value);
+      if (!record) {
+        return 'null';
+      }
+
+      const keys = Object.keys(record).sort();
+      const entries = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+      return `{${entries.join(',')}}`;
+    }
+    default:
+      return 'null';
+  }
+};
+
+const extractWebhookEventKey = (payload: Record<string, unknown>): string => {
+  const eventParts: string[] = [];
+  const entries = Array.isArray(payload.entry) ? payload.entry : [];
+
+  for (const entry of entries) {
+    const entryRecord = asRecord(entry);
+    if (!entryRecord) {
+      continue;
+    }
+
+    const changes = Array.isArray(entryRecord.changes) ? entryRecord.changes : [];
+
+    for (const change of changes) {
+      const changeRecord = asRecord(change);
+      const valueRecord = changeRecord ? asRecord(changeRecord.value) : null;
+      if (!valueRecord) {
+        continue;
+      }
+
+      const messages = Array.isArray(valueRecord.messages) ? valueRecord.messages : [];
+      for (const message of messages) {
+        const messageRecord = asRecord(message);
+        if (messageRecord && typeof messageRecord.id === 'string') {
+          eventParts.push(`message:${messageRecord.id}`);
+        }
+      }
+
+      const statuses = Array.isArray(valueRecord.statuses) ? valueRecord.statuses : [];
+      for (const status of statuses) {
+        const statusRecord = asRecord(status);
+        if (statusRecord && typeof statusRecord.id === 'string') {
+          eventParts.push(`status:${statusRecord.id}`);
+        }
+      }
     }
   }
 
-  const adminUser = req.header(adminAuthHeader);
-  const adminRole = req.header(adminRoleHeader);
-  if (!adminUser) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
+  if (eventParts.length > 0) {
+    return eventParts.sort().join('|');
   }
 
-  if (!adminRole || !adminAllowedRoles.includes(adminRole)) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-
-  next();
+  // Fallback keeps idempotency deterministic even for unexpected payload variants.
+  const digest = createHash('sha256').update(stableStringify(payload)).digest('hex');
+  return `payload:${digest}`;
 };
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true });
-});
+const coerceJsonValue = (value: unknown): JsonValue => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
 
-app.get('/admin/health', enforceAdminAccess, (_req, res) => {
-  res.json({ ok: true });
-});
+  if (Array.isArray(value)) {
+    return value.map((entry) => coerceJsonValue(entry));
+  }
 
-const port = Number(env.PORT);
-if (!Number.isFinite(port)) {
-  throw new Error(`PORT must be a number, received "${env.PORT}"`);
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const jsonObject: { [key: string]: JsonValue } = {};
+  for (const [key, entry] of Object.entries(record)) {
+    jsonObject[key] = coerceJsonValue(entry);
+  }
+
+  return jsonObject;
+};
+
+export const createRedisIdempotencyStore = (redisUrl: string): IdempotencyStore => {
+  const redis = createClient({ url: redisUrl });
+  let connectPromise: Promise<void> | null = null;
+
+  const ensureConnected = async () => {
+    if (redis.isOpen) {
+      return;
+    }
+
+    if (!connectPromise) {
+      connectPromise = redis
+        .connect()
+        .then(() => undefined)
+        .finally(() => {
+          connectPromise = null;
+        });
+    }
+
+    await connectPromise;
+  };
+
+  return {
+    setIfNotExists: async (key, ttlSeconds) => {
+      await ensureConnected();
+      const result = await redis.set(key, '1', {
+        EX: ttlSeconds,
+        NX: true,
+      });
+      return result === 'OK';
+    },
+    delete: async (key) => {
+      await ensureConnected();
+      await redis.del(key);
+    },
+  };
+};
+
+export const createBullMqIngressQueue = (redisUrl: string): IngressQueue => {
+  const queue = new Queue(INGRESS_QUEUE_NAME, {
+    connection: { url: redisUrl },
+    defaultJobOptions: {
+      removeOnComplete: true,
+      removeOnFail: false,
+    },
+  });
+
+  return {
+    enqueue: async (job) => {
+      await queue.add(INGRESS_JOB_NAME, job);
+    },
+  };
+};
+
+export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {}) => {
+  const env = validateEnv(runtimeEnv);
+  const app = express();
+  const isDevelopment = runtimeEnv.NODE_ENV === 'development';
+  const allowInsecureHttp = runtimeEnv.ALLOW_INSECURE_HTTP === 'true';
+  const trustProxy = runtimeEnv.TRUST_PROXY === 'true';
+  const adminIpAllowlist = runtimeEnv.ADMIN_IP_ALLOWLIST
+    ? runtimeEnv.ADMIN_IP_ALLOWLIST.split(',')
+        .map((value: string) => value.trim())
+        .filter(Boolean)
+    : [];
+  const adminRateLimitWindowMs = parseNumber(runtimeEnv.ADMIN_RATE_LIMIT_WINDOW_MS, 60_000);
+  const adminRateLimitMax = parseNumber(runtimeEnv.ADMIN_RATE_LIMIT_MAX, 30);
+  const webhookBodyLimit = runtimeEnv.WEBHOOK_BODY_LIMIT || '256kb';
+  const webhookRateLimitWindowMs = parseNumber(runtimeEnv.WEBHOOK_RATE_LIMIT_WINDOW_MS, 60_000);
+  const webhookRateLimitMax = parseNumber(runtimeEnv.WEBHOOK_RATE_LIMIT_MAX, 120);
+  const idempotencyTtlSeconds =
+    options.idempotencyTtlSeconds ??
+    parseNumber(runtimeEnv.WEBHOOK_IDEMPOTENCY_TTL_SECONDS, DEFAULT_IDEMPOTENCY_TTL_SECONDS);
+  const idempotencyStore = options.idempotencyStore ?? createRedisIdempotencyStore(env.REDIS_URL);
+  const ingressQueue = options.ingressQueue ?? createBullMqIngressQueue(env.REDIS_URL);
+  const observability = options.observability ?? createDefaultIngressObservability();
+  const adminAuthHeader = runtimeEnv.ADMIN_AUTH_HEADER?.trim() || 'x-wa-user';
+  const adminRoleHeader = runtimeEnv.ADMIN_ROLE_HEADER?.trim() || 'x-wa-role';
+  const adminAllowedRoles = runtimeEnv.ADMIN_ALLOWED_ROLES
+    ? runtimeEnv.ADMIN_ALLOWED_ROLES.split(',')
+        .map((value: string) => value.trim())
+        .filter(Boolean)
+    : ['admin'];
+  const adminRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  const webhookRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  const parseWebhookJson: express.RequestHandler = express.json({
+    limit: webhookBodyLimit,
+    verify: (req, _res, buffer) => {
+      (req as WebhookRequest).rawBody = Buffer.from(buffer);
+    },
+  });
+
+  app.set('trust proxy', trustProxy ? 1 : false);
+
+  const normalizeIp = (ip: string) => ip.replace(/^::ffff:/, '');
+
+  const buildIngressTraceContext = (
+    req: express.Request,
+    sourceIp: string,
+  ): IngressTraceContext => {
+    const incomingCorrelationId = req.header('x-correlation-id')?.trim();
+
+    return {
+      traceId: createTraceId(),
+      correlationId: incomingCorrelationId || createCorrelationId(),
+      method: req.method,
+      path: req.path,
+      sourceIp,
+      receivedAt: new Date().toISOString(),
+    };
+  };
+
+  const getIngressTraceContext = (req: express.Request) => {
+    const webhookRequest = req as WebhookRequest;
+    const sourceIp = normalizeIp(req.ip || 'unknown');
+    if (webhookRequest.ingressContext) {
+      return webhookRequest.ingressContext;
+    }
+
+    const context = buildIngressTraceContext(req, sourceIp);
+    webhookRequest.ingressContext = context;
+    observability.onIngressStart(context);
+    return context;
+  };
+
+  const attachIngressTraceContext: express.RequestHandler = (req, res, next) => {
+    const sourceIp = normalizeIp(req.ip || 'unknown');
+    const context = buildIngressTraceContext(req, sourceIp);
+    (req as WebhookRequest).ingressContext = context;
+    res.setHeader('x-correlation-id', context.correlationId);
+    observability.onIngressStart(context);
+    next();
+  };
+
+  const isHttpsRequest = (req: express.Request) => {
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    if (typeof forwardedProto === 'string') {
+      const proto = forwardedProto.split(',')[0] ?? '';
+      return proto.trim() === 'https';
+    }
+    return req.secure;
+  };
+
+  const sendWebhookError = (
+    res: express.Response,
+    status: number,
+    code: string,
+    message: string,
+  ) => {
+    res.status(status).json({
+      error: {
+        code,
+        message,
+      },
+    });
+  };
+
+  const isValidWhatsappSignature = (rawBody: Buffer, signatureHeader: string) => {
+    if (!signatureHeader.startsWith('sha256=')) {
+      return false;
+    }
+
+    const provided = signatureHeader.slice(7).trim();
+    if (!provided) {
+      return false;
+    }
+
+    const expected = createHmac('sha256', env.WHATSAPP_APP_SECRET).update(rawBody).digest('hex');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(providedBuffer, expectedBuffer);
+  };
+
+  const applyWebhookRateLimit: express.RequestHandler = (req, res, next) => {
+    const sourceIp = normalizeIp(req.ip || 'unknown');
+    const now = Date.now();
+    const current = webhookRateLimitStore.get(sourceIp);
+
+    if (!current || now >= current.resetAt) {
+      webhookRateLimitStore.set(sourceIp, { count: 1, resetAt: now + webhookRateLimitWindowMs });
+      next();
+      return;
+    }
+
+    current.count += 1;
+    if (current.count > webhookRateLimitMax) {
+      sendWebhookError(res, 429, 'RATE_LIMITED', 'Rate limit exceeded');
+      return;
+    }
+
+    next();
+  };
+
+  app.use((req, res, next) => {
+    if (isDevelopment || allowInsecureHttp || isHttpsRequest(req)) {
+      next();
+      return;
+    }
+
+    res.status(426).json({ error: 'HTTPS required' });
+  });
+
+  const enforceAdminAccess: express.RequestHandler = (req, res, next) => {
+    const ip = normalizeIp(req.ip || '');
+    if (adminIpAllowlist.length > 0 && !adminIpAllowlist.includes(ip)) {
+      res.status(403).json({ error: 'IP not allowed' });
+      return;
+    }
+
+    const now = Date.now();
+    const current = adminRateLimitStore.get(ip);
+    if (!current || now >= current.resetAt) {
+      adminRateLimitStore.set(ip, { count: 1, resetAt: now + adminRateLimitWindowMs });
+    } else {
+      current.count += 1;
+      if (current.count > adminRateLimitMax) {
+        res.status(429).json({ error: 'Rate limit exceeded' });
+        return;
+      }
+    }
+
+    const adminUser = req.header(adminAuthHeader);
+    const adminRole = req.header(adminRoleHeader);
+    if (!adminUser) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (!adminRole || !adminAllowedRoles.includes(adminRole)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    next();
+  };
+
+  app.get('/health', (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get('/ready', (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get('/webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === env.WHATSAPP_VERIFY_TOKEN && challenge) {
+      res.status(200).type('text/plain').send(String(challenge));
+      return;
+    }
+
+    res.status(403).json({ error: 'Verification failed' });
+  });
+
+  app.post('/webhook', attachIngressTraceContext, parseWebhookJson, applyWebhookRateLimit, async (req, res) => {
+    const webhookRequest = req as WebhookRequest;
+    const ingressContext = getIngressTraceContext(req);
+    const signatureHeader = req.header('x-hub-signature-256') || '';
+
+    if (!webhookRequest.rawBody || !signatureHeader) {
+      observability.onVerificationFailure(ingressContext, {
+        reason: 'missing_signature',
+      });
+      sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Missing WhatsApp signature');
+      return;
+    }
+
+    if (!isValidWhatsappSignature(webhookRequest.rawBody, signatureHeader)) {
+      observability.onVerificationFailure(ingressContext, {
+        reason: 'invalid_signature',
+      });
+      sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Invalid WhatsApp signature');
+      return;
+    }
+
+    const payload = req.body;
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload) ||
+      typeof payload.object !== 'string'
+    ) {
+      observability.onMalformedPayload(ingressContext, {
+        reason: 'invalid_structure',
+      });
+      sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid webhook payload');
+      return;
+    }
+
+    const eventKey = extractWebhookEventKey(payload);
+    const dedupeKey = `idempotency:webhook:${eventKey}`;
+
+    const firstSeen = await idempotencyStore.setIfNotExists(dedupeKey, idempotencyTtlSeconds);
+    if (!firstSeen) {
+      observability.onDuplicateHit(ingressContext, {
+        eventKey,
+      });
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    try {
+      await ingressQueue.enqueue({
+        eventKey,
+        payload: coerceJsonValue(payload),
+        receivedAt: new Date().toISOString(),
+      });
+      observability.onEnqueueSuccess(ingressContext, {
+        eventKey,
+      });
+    } catch {
+      await idempotencyStore.delete(dedupeKey);
+      observability.onEnqueueFailure(ingressContext, {
+        eventKey,
+        errorCode: 'ENQUEUE_FAILED',
+      });
+      sendWebhookError(res, 503, 'ENQUEUE_FAILED', 'Failed to enqueue webhook event');
+      return;
+    }
+
+    res.status(200).json({ ok: true });
+  });
+
+  app.get('/admin/health', enforceAdminAccess, (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.use(
+    (
+      error: Error & { status?: number; type?: string },
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      if (req.path !== '/webhook') {
+        next(error);
+        return;
+      }
+
+      if (error.type === 'entity.too.large') {
+        const ingressContext = getIngressTraceContext(req);
+        observability.onMalformedPayload(ingressContext, {
+          reason: 'payload_too_large',
+        });
+        sendWebhookError(res, 413, 'PAYLOAD_TOO_LARGE', 'Webhook payload exceeds limit');
+        return;
+      }
+
+      if (error instanceof SyntaxError || error.type === 'entity.parse.failed') {
+        const ingressContext = getIngressTraceContext(req);
+        observability.onMalformedPayload(ingressContext, {
+          reason: 'invalid_json',
+        });
+        sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid JSON payload');
+        return;
+      }
+
+      next(error);
+    },
+  );
+
+  return app;
+};
+
+export const startServer = (runtimeEnv: NodeJS.ProcessEnv) => {
+  const env = validateEnv(runtimeEnv);
+  const port = Number(env.PORT);
+  if (!Number.isFinite(port)) {
+    throw new Error(`PORT must be a number, received "${env.PORT}"`);
+  }
+
+  const app = createApp(runtimeEnv);
+  return app.listen(port, () => {
+    console.log(`API listening on ${port}`);
+  });
+};
+
+dotenv.config();
+const entrypointUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : undefined;
+if (entrypointUrl === import.meta.url) {
+  startServer(process.env);
 }
-app.listen(port, () => {
-  console.log(`API listening on ${port}`);
-});
