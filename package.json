@@ -1,0 +1,44 @@
+{
+  "name": "wa-chat",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:dashboard": "npm --workspace apps/dashboard run dev",
+    "dev": "npm run dev:api & npm run dev:dashboard",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "@commitlint/config-conventional": "^19.9.0",
+    "@eslint/js": "^9.34.0",
+    "@types/express": "^5.0.6",
+    "commitlint": "^19.9.0",
+    "eslint": "^9.34.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.32.0"
+  },
+  "lint-staged": {
+    "apps/dashboard/**/*.{js,jsx,ts,tsx}": [
+      "npm --workspace apps/dashboard run lint -- --fix"
+    ],
+    "apps/{api,worker}/**/*.{js,jsx,ts,tsx,mts,cts}": [
+      "eslint --fix"
+    ],
+    "packages/**/*.{js,jsx,ts,tsx,mts,cts}": [
+      "eslint --fix"
+    ],
+    "*.{json,md,css,scss,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

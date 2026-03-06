@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+yarn.lock
+pnpm-lock.yaml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+.next/
+build/
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temp files
+*.tmp
+*.temp
+
+# Markdown (except README)
+*.md
+!README.md
+/docs
+*.txt
