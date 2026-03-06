@@ -6,7 +6,7 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@wa-chat/config": ["../../packages/config/dist/index.d.ts"]
+      "@wa-chat/config": ["../../packages/config/src/index.ts"]
     },
     "rootDir": "./src",
     "outDir": "./dist",

@@ -16,7 +16,18 @@ export const REQUIRED_ENV_VARS = [
   'OTEL_SERVICE_NAME',
 ] as const;
 
-export const OPTIONAL_ENV_VARS = ['LANGCHAIN_TRACING_V2', 'LANGCHAIN_API_KEY'] as const;
+export const OPTIONAL_ENV_VARS = [
+  'LANGCHAIN_TRACING_V2',
+  'LANGCHAIN_API_KEY',
+  'ALLOW_INSECURE_HTTP',
+  'TRUST_PROXY',
+  'ADMIN_IP_ALLOWLIST',
+  'ADMIN_RATE_LIMIT_WINDOW_MS',
+  'ADMIN_RATE_LIMIT_MAX',
+  'ADMIN_AUTH_HEADER',
+  'ADMIN_ROLE_HEADER',
+  'ADMIN_ALLOWED_ROLES',
+] as const;
 
 export type RequiredEnvVar = (typeof REQUIRED_ENV_VARS)[number];
 export type OptionalEnvVar = (typeof OPTIONAL_ENV_VARS)[number];

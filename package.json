@@ -13,6 +13,9 @@
     "dev:api": "npm --workspace apps/api run dev",
     "dev:dashboard": "npm --workspace apps/dashboard run dev",
     "dev": "npm run dev:api & npm run dev:dashboard",
+    "dev:infra": "./scripts/local-dev-up.sh",
+    "dev:infra:down": "./scripts/local-dev-down.sh",
+    "seed:local": "./scripts/seed-local-db.sh",
     "prepare": "husky install"
   },
   "devDependencies": {
