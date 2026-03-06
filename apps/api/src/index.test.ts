@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { createApp } from './index.js';
 
 const color = {
@@ -46,60 +47,282 @@ const buildTestEnv = (): NodeJS.ProcessEnv => ({
   ALLOW_INSECURE_HTTP: 'true',
 });
 
-console.log(`${color.cyan}API Endpoint Tests (E1)${color.reset}\n`);
+const signBody = (body: string, secret: string) => {
+  const digest = createHmac('sha256', secret).update(body).digest('hex');
+  return `sha256=${digest}`;
+};
 
-const app = createApp(buildTestEnv());
-const server = app.listen(0);
+async function withServer<T>(
+  envOverrides: Partial<NodeJS.ProcessEnv>,
+  fn: (baseUrl: string, env: NodeJS.ProcessEnv) => Promise<T>,
+) {
+  const env = {
+    ...buildTestEnv(),
+    ...envOverrides,
+  };
+
+  const app = createApp(env);
+  const server = app.listen(0);
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === 'object' && 'port' in address);
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    return await fn(baseUrl, env);
+  } finally {
+    server.close();
+  }
+}
+
+console.log(`${color.cyan}API Endpoint Tests (E1 + E2)${color.reset}\n`);
 
 try {
-  const address = server.address();
-  assert.ok(address && typeof address === 'object' && 'port' in address);
-
-  const baseUrl = `http://127.0.0.1:${address.port}`;
-
   await runTest('GET /health returns 200', async () => {
-    const res = await fetch(`${baseUrl}/health`);
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true });
+    await withServer({}, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/health`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+    });
   });
 
   await runTest('GET /ready returns 200', async () => {
-    const res = await fetch(`${baseUrl}/ready`);
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true });
+    await withServer({}, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/ready`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+    });
+  });
+
+  await runTest('HTTP requests pass in development without ALLOW_INSECURE_HTTP', async () => {
+    await withServer(
+      {
+        NODE_ENV: 'development',
+        ALLOW_INSECURE_HTTP: 'false',
+      },
+      async (baseUrl) => {
+        const res = await fetch(`${baseUrl}/health`);
+        assert.equal(res.status, 200);
+        assert.deepEqual(await res.json(), { ok: true });
+      },
+    );
+  });
+
+  await runTest('HTTP requests are blocked outside development when ALLOW_INSECURE_HTTP is false', async () => {
+    await withServer(
+      {
+        NODE_ENV: 'production',
+        ALLOW_INSECURE_HTTP: 'false',
+      },
+      async (baseUrl) => {
+        const res = await fetch(`${baseUrl}/health`);
+        assert.equal(res.status, 426);
+        assert.deepEqual(await res.json(), { error: 'HTTPS required' });
+      },
+    );
   });
 
   await runTest('Webhook verification success', async () => {
-    const res = await fetch(
-      `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=challenge-123`,
-    );
+    await withServer({}, async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=challenge-123`,
+      );
 
-    assert.equal(res.status, 200);
-    assert.equal(await res.text(), 'challenge-123');
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'challenge-123');
+    });
+  });
+
+  await runTest('GET /webhook does not require signature header', async () => {
+    await withServer({}, async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=no-signature-needed`,
+      );
+
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'no-signature-needed');
+    });
+  });
+
+  await runTest('GET /webhook is unaffected by POST body limit config', async () => {
+    await withServer({ WEBHOOK_BODY_LIMIT: '1b' }, async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=still-works`,
+      );
+
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'still-works');
+    });
   });
 
   await runTest('Webhook verification fails with wrong token', async () => {
-    const res = await fetch(
-      `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=wrong-token&hub.challenge=challenge-123`,
-    );
+    await withServer({}, async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=wrong-token&hub.challenge=challenge-123`,
+      );
 
-    assert.equal(res.status, 403);
-    assert.deepEqual(await res.json(), { error: 'Verification failed' });
+      assert.equal(res.status, 403);
+      assert.deepEqual(await res.json(), { error: 'Verification failed' });
+    });
   });
 
-  await runTest('POST /webhook accepts payload', async () => {
-    const res = await fetch(`${baseUrl}/webhook`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ object: 'whatsapp_business_account' }),
-    });
+  await runTest('POST /webhook accepts valid signed payload', async () => {
+    await withServer({}, async (baseUrl, env) => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+        },
+        body: payload,
+      });
 
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true });
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+    });
+  });
+
+  await runTest('POST /webhook rejects missing signature header', async () => {
+    await withServer({}, async (baseUrl) => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: payload,
+      });
+
+      assert.equal(res.status, 401);
+      assert.deepEqual(await res.json(), {
+        error: {
+          code: 'INVALID_SIGNATURE',
+          message: 'Missing WhatsApp signature',
+        },
+      });
+    });
+  });
+
+  await runTest('POST /webhook rejects invalid signature', async () => {
+    await withServer({}, async (baseUrl) => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': 'sha256=invalid-signature',
+        },
+        body: payload,
+      });
+
+      assert.equal(res.status, 401);
+      assert.deepEqual(await res.json(), {
+        error: {
+          code: 'INVALID_SIGNATURE',
+          message: 'Invalid WhatsApp signature',
+        },
+      });
+    });
+  });
+
+  await runTest('POST /webhook rejects malformed payload structure', async () => {
+    await withServer({}, async (baseUrl, env) => {
+      const payload = JSON.stringify({ foo: 'bar' });
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+        },
+        body: payload,
+      });
+
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), {
+        error: {
+          code: 'MALFORMED_PAYLOAD',
+          message: 'Invalid webhook payload',
+        },
+      });
+    });
+  });
+
+  await runTest('POST /webhook rejects invalid JSON body', async () => {
+    await withServer({}, async (baseUrl, env) => {
+      const invalidJson = '{"object":';
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signBody(invalidJson, env.WHATSAPP_APP_SECRET!),
+        },
+        body: invalidJson,
+      });
+
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), {
+        error: {
+          code: 'MALFORMED_PAYLOAD',
+          message: 'Invalid JSON payload',
+        },
+      });
+    });
+  });
+
+  await runTest('POST /webhook enforces body size limit', async () => {
+    await withServer({ WEBHOOK_BODY_LIMIT: '32b' }, async (baseUrl, env) => {
+      const payload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        data: '1234567890123',
+      });
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+        },
+        body: payload,
+      });
+
+      assert.equal(res.status, 413);
+      assert.deepEqual(await res.json(), {
+        error: {
+          code: 'PAYLOAD_TOO_LARGE',
+          message: 'Webhook payload exceeds limit',
+        },
+      });
+    });
+  });
+
+  await runTest('POST /webhook applies source rate limiting', async () => {
+    await withServer(
+      { WEBHOOK_RATE_LIMIT_MAX: '2', WEBHOOK_RATE_LIMIT_WINDOW_MS: '60000' },
+      async (baseUrl, env) => {
+        const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+        const headers = {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+        };
+
+        const first = await fetch(`${baseUrl}/webhook`, { method: 'POST', headers, body: payload });
+        const second = await fetch(`${baseUrl}/webhook`, {
+          method: 'POST',
+          headers,
+          body: payload,
+        });
+        const third = await fetch(`${baseUrl}/webhook`, { method: 'POST', headers, body: payload });
+
+        assert.equal(first.status, 200);
+        assert.equal(second.status, 200);
+        assert.equal(third.status, 429);
+        assert.deepEqual(await third.json(), {
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'Rate limit exceeded',
+          },
+        });
+      },
+    );
   });
 } finally {
-  server.close();
-
   console.log('\n' + '-'.repeat(40));
 
   if (failed === 0) {

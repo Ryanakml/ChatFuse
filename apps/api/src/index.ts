@@ -2,10 +2,16 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { validateEnv } from '@wa-chat/config';
 import { pathToFileURL } from 'node:url';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+type WebhookRequest = express.Request & {
+  rawBody?: Buffer;
+};
 
 export const createApp = (runtimeEnv: NodeJS.ProcessEnv) => {
   const env = validateEnv(runtimeEnv);
   const app = express();
+  const isDevelopment = runtimeEnv.NODE_ENV === 'development';
   const allowInsecureHttp = runtimeEnv.ALLOW_INSECURE_HTTP === 'true';
   const trustProxy = runtimeEnv.TRUST_PROXY === 'true';
   const adminIpAllowlist = runtimeEnv.ADMIN_IP_ALLOWLIST
@@ -24,6 +30,9 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv) => {
 
   const adminRateLimitWindowMs = parseNumber(runtimeEnv.ADMIN_RATE_LIMIT_WINDOW_MS, 60_000);
   const adminRateLimitMax = parseNumber(runtimeEnv.ADMIN_RATE_LIMIT_MAX, 30);
+  const webhookBodyLimit = runtimeEnv.WEBHOOK_BODY_LIMIT || '256kb';
+  const webhookRateLimitWindowMs = parseNumber(runtimeEnv.WEBHOOK_RATE_LIMIT_WINDOW_MS, 60_000);
+  const webhookRateLimitMax = parseNumber(runtimeEnv.WEBHOOK_RATE_LIMIT_MAX, 120);
   const adminAuthHeader = runtimeEnv.ADMIN_AUTH_HEADER?.trim() || 'x-wa-user';
   const adminRoleHeader = runtimeEnv.ADMIN_ROLE_HEADER?.trim() || 'x-wa-role';
   const adminAllowedRoles = runtimeEnv.ADMIN_ALLOWED_ROLES
@@ -32,9 +41,15 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv) => {
         .filter(Boolean)
     : ['admin'];
   const adminRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  const webhookRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  const parseWebhookJson: express.RequestHandler = express.json({
+    limit: webhookBodyLimit,
+    verify: (req, _res, buffer) => {
+      (req as WebhookRequest).rawBody = Buffer.from(buffer);
+    },
+  });
 
   app.set('trust proxy', trustProxy ? 1 : false);
-  app.use(express.json());
 
   const normalizeIp = (ip: string) => ip.replace(/^::ffff:/, '');
 
@@ -47,8 +62,63 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv) => {
     return req.secure;
   };
 
+  const sendWebhookError = (
+    res: express.Response,
+    status: number,
+    code: string,
+    message: string,
+  ) => {
+    res.status(status).json({
+      error: {
+        code,
+        message,
+      },
+    });
+  };
+
+  const isValidWhatsappSignature = (rawBody: Buffer, signatureHeader: string) => {
+    if (!signatureHeader.startsWith('sha256=')) {
+      return false;
+    }
+
+    const provided = signatureHeader.slice(7).trim();
+    if (!provided) {
+      return false;
+    }
+
+    const expected = createHmac('sha256', env.WHATSAPP_APP_SECRET).update(rawBody).digest('hex');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(providedBuffer, expectedBuffer);
+  };
+
+  const applyWebhookRateLimit: express.RequestHandler = (req, res, next) => {
+    const sourceIp = normalizeIp(req.ip || 'unknown');
+    const now = Date.now();
+    const current = webhookRateLimitStore.get(sourceIp);
+
+    if (!current || now >= current.resetAt) {
+      webhookRateLimitStore.set(sourceIp, { count: 1, resetAt: now + webhookRateLimitWindowMs });
+      next();
+      return;
+    }
+
+    current.count += 1;
+    if (current.count > webhookRateLimitMax) {
+      sendWebhookError(res, 429, 'RATE_LIMITED', 'Rate limit exceeded');
+      return;
+    }
+
+    next();
+  };
+
   app.use((req, res, next) => {
-    if (allowInsecureHttp || isHttpsRequest(req)) {
+    if (isDevelopment || allowInsecureHttp || isHttpsRequest(req)) {
       next();
       return;
     }
@@ -111,13 +181,63 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv) => {
     res.status(403).json({ error: 'Verification failed' });
   });
 
-  app.post('/webhook', (_req, res) => {
+  app.post('/webhook', parseWebhookJson, applyWebhookRateLimit, (req, res) => {
+    const webhookRequest = req as WebhookRequest;
+    const signatureHeader = req.header('x-hub-signature-256') || '';
+
+    if (!webhookRequest.rawBody || !signatureHeader) {
+      sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Missing WhatsApp signature');
+      return;
+    }
+
+    if (!isValidWhatsappSignature(webhookRequest.rawBody, signatureHeader)) {
+      sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Invalid WhatsApp signature');
+      return;
+    }
+
+    const payload = req.body;
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload) ||
+      typeof payload.object !== 'string'
+    ) {
+      sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid webhook payload');
+      return;
+    }
+
     res.status(200).json({ ok: true });
   });
 
   app.get('/admin/health', enforceAdminAccess, (_req, res) => {
     res.json({ ok: true });
   });
+
+  app.use(
+    (
+      error: Error & { status?: number; type?: string },
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      if (req.path !== '/webhook') {
+        next(error);
+        return;
+      }
+
+      if (error.type === 'entity.too.large') {
+        sendWebhookError(res, 413, 'PAYLOAD_TOO_LARGE', 'Webhook payload exceeds limit');
+        return;
+      }
+
+      if (error instanceof SyntaxError || error.type === 'entity.parse.failed') {
+        sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid JSON payload');
+        return;
+      }
+
+      next(error);
+    },
+  );
 
   return app;
 };

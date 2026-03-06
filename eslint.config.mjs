@@ -9,6 +9,8 @@ export default [
     files: ['apps/api/src/**/*.{js,cjs,mjs,ts,tsx}', 'apps/worker/src/**/*.{js,cjs,mjs,ts,tsx}'],
     languageOptions: {
       globals: {
+        Buffer: 'readonly',
+        fetch: 'readonly',
         process: 'readonly',
         console: 'readonly',
       },
