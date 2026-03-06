@@ -6,6 +6,35 @@ export type IngressJobPayload = {
     payload: JsonValue;
     receivedAt: string;
 };
+export type IngressTraceContext = {
+    traceId: string;
+    correlationId: string;
+    method: string;
+    path: string;
+    sourceIp: string;
+    receivedAt: string;
+};
+type VerificationFailureReason = 'missing_signature' | 'invalid_signature';
+type MalformedPayloadReason = 'invalid_structure' | 'invalid_json' | 'payload_too_large';
+export interface IngressObservability {
+    onIngressStart: (context: IngressTraceContext) => void;
+    onVerificationFailure: (context: IngressTraceContext, details: {
+        reason: VerificationFailureReason;
+    }) => void;
+    onMalformedPayload: (context: IngressTraceContext, details: {
+        reason: MalformedPayloadReason;
+    }) => void;
+    onDuplicateHit: (context: IngressTraceContext, details: {
+        eventKey: string;
+    }) => void;
+    onEnqueueSuccess: (context: IngressTraceContext, details: {
+        eventKey: string;
+    }) => void;
+    onEnqueueFailure: (context: IngressTraceContext, details: {
+        eventKey: string;
+        errorCode: string;
+    }) => void;
+}
 export interface IdempotencyStore {
     setIfNotExists: (key: string, ttlSeconds: number) => Promise<boolean>;
     delete: (key: string) => Promise<void>;
@@ -17,6 +46,7 @@ type AppDependencies = {
     idempotencyStore: IdempotencyStore;
     ingressQueue: IngressQueue;
     idempotencyTtlSeconds: number;
+    observability: IngressObservability;
 };
 type AppOptions = Partial<AppDependencies>;
 export declare const createRedisIdempotencyStore: (redisUrl: string) => IdempotencyStore;

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import type { IdempotencyStore, IngressJobPayload, IngressQueue } from './index.js';
+import type {
+  IdempotencyStore,
+  IngressJobPayload,
+  IngressObservability,
+  IngressQueue,
+  IngressTraceContext,
+} from './index.js';
 import { createApp } from './index.js';
 
 const color = {
@@ -16,8 +22,24 @@ let failed = 0;
 type TestIngressDependencies = {
   idempotencyStore: IdempotencyStore;
   ingressQueue: IngressQueue;
+  observability: IngressObservability;
+  observabilityEvents: ObservabilityEvent[];
   enqueuedJobs: IngressJobPayload[];
 };
+
+type ObservabilityEvent =
+  | { type: 'ingress_start'; context: IngressTraceContext }
+  | { type: 'verification_failure'; context: IngressTraceContext; reason: string }
+  | { type: 'malformed_payload'; context: IngressTraceContext; reason: string }
+  | { type: 'duplicate_hit'; context: IngressTraceContext; eventKey: string }
+  | { type: 'enqueue_success'; context: IngressTraceContext; eventKey: string }
+  | { type: 'enqueue_failure'; context: IngressTraceContext; eventKey: string; errorCode: string };
+
+const getObservabilityEvents = <T extends ObservabilityEvent['type']>(
+  events: ObservabilityEvent[],
+  type: T,
+): Extract<ObservabilityEvent, { type: T }>[] =>
+  events.filter((event): event is Extract<ObservabilityEvent, { type: T }> => event.type === type);
 
 async function runTest(name: string, fn: () => Promise<void> | void) {
   process.stdout.write(`${color.cyan}RUN${color.reset} ${name} ... `);
@@ -70,6 +92,7 @@ async function withServer<T>(
 
   const enqueuedJobs: IngressJobPayload[] = [];
   const seenIdempotencyKeys = new Set<string>();
+  const observabilityEvents: ObservabilityEvent[] = [];
 
   const deps: TestIngressDependencies = {
     idempotencyStore: {
@@ -90,12 +113,58 @@ async function withServer<T>(
         enqueuedJobs.push(job);
       },
     },
+    observability: {
+      onIngressStart: (context) => {
+        observabilityEvents.push({
+          type: 'ingress_start',
+          context: { ...context },
+        });
+      },
+      onVerificationFailure: (context, details) => {
+        observabilityEvents.push({
+          type: 'verification_failure',
+          context: { ...context },
+          reason: details.reason,
+        });
+      },
+      onMalformedPayload: (context, details) => {
+        observabilityEvents.push({
+          type: 'malformed_payload',
+          context: { ...context },
+          reason: details.reason,
+        });
+      },
+      onDuplicateHit: (context, details) => {
+        observabilityEvents.push({
+          type: 'duplicate_hit',
+          context: { ...context },
+          eventKey: details.eventKey,
+        });
+      },
+      onEnqueueSuccess: (context, details) => {
+        observabilityEvents.push({
+          type: 'enqueue_success',
+          context: { ...context },
+          eventKey: details.eventKey,
+        });
+      },
+      onEnqueueFailure: (context, details) => {
+        observabilityEvents.push({
+          type: 'enqueue_failure',
+          context: { ...context },
+          eventKey: details.eventKey,
+          errorCode: details.errorCode,
+        });
+      },
+    },
+    observabilityEvents,
     enqueuedJobs,
   };
 
   const app = createApp(env, {
     idempotencyStore: deps.idempotencyStore,
     ingressQueue: deps.ingressQueue,
+    observability: deps.observability,
     idempotencyTtlSeconds: 300,
   });
   const server = app.listen(0);
@@ -110,7 +179,7 @@ async function withServer<T>(
   }
 }
 
-console.log(`${color.cyan}API Endpoint Tests (E1 + E2 + E3)${color.reset}\n`);
+console.log(`${color.cyan}API Endpoint Tests (E1 + E2 + E3 + E4)${color.reset}\n`);
 
 try {
   await runTest('GET /health returns 200', async () => {
@@ -207,10 +276,12 @@ try {
   await runTest('POST /webhook accepts valid signed payload', async () => {
     await withServer({}, async (baseUrl, env, deps) => {
       const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const correlationId = 'test-correlation-id';
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
+          'x-correlation-id': correlationId,
           'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
         },
         body: payload,
@@ -218,13 +289,23 @@ try {
 
       assert.equal(res.status, 200);
       assert.deepEqual(await res.json(), { ok: true });
+      assert.equal(res.headers.get('x-correlation-id'), correlationId);
       assert.equal(deps.enqueuedJobs.length, 1);
       assert.equal(typeof deps.enqueuedJobs[0]?.eventKey, 'string');
+
+      const ingressEvents = getObservabilityEvents(deps.observabilityEvents, 'ingress_start');
+      assert.equal(ingressEvents.length, 1);
+      assert.equal(ingressEvents[0]?.context.correlationId, correlationId);
+      assert.match(ingressEvents[0]?.context.traceId || '', /^[a-f0-9]{32}$/);
+
+      const enqueueSuccessEvents = getObservabilityEvents(deps.observabilityEvents, 'enqueue_success');
+      assert.equal(enqueueSuccessEvents.length, 1);
+      assert.equal(typeof enqueueSuccessEvents[0]?.eventKey, 'string');
     });
   });
 
   await runTest('POST /webhook rejects missing signature header', async () => {
-    await withServer({}, async (baseUrl) => {
+    await withServer({}, async (baseUrl, _env, deps) => {
       const payload = JSON.stringify({ object: 'whatsapp_business_account' });
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
@@ -239,11 +320,18 @@ try {
           message: 'Missing WhatsApp signature',
         },
       });
+
+      const verificationFailureEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'verification_failure',
+      );
+      assert.equal(verificationFailureEvents.length, 1);
+      assert.equal(verificationFailureEvents[0]?.reason, 'missing_signature');
     });
   });
 
   await runTest('POST /webhook rejects invalid signature', async () => {
-    await withServer({}, async (baseUrl) => {
+    await withServer({}, async (baseUrl, _env, deps) => {
       const payload = JSON.stringify({ object: 'whatsapp_business_account' });
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
@@ -261,11 +349,18 @@ try {
           message: 'Invalid WhatsApp signature',
         },
       });
+
+      const verificationFailureEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'verification_failure',
+      );
+      assert.equal(verificationFailureEvents.length, 1);
+      assert.equal(verificationFailureEvents[0]?.reason, 'invalid_signature');
     });
   });
 
   await runTest('POST /webhook rejects malformed payload structure', async () => {
-    await withServer({}, async (baseUrl, env) => {
+    await withServer({}, async (baseUrl, env, deps) => {
       const payload = JSON.stringify({ foo: 'bar' });
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
@@ -283,11 +378,15 @@ try {
           message: 'Invalid webhook payload',
         },
       });
+
+      const malformedPayloadEvents = getObservabilityEvents(deps.observabilityEvents, 'malformed_payload');
+      assert.equal(malformedPayloadEvents.length, 1);
+      assert.equal(malformedPayloadEvents[0]?.reason, 'invalid_structure');
     });
   });
 
   await runTest('POST /webhook rejects invalid JSON body', async () => {
-    await withServer({}, async (baseUrl, env) => {
+    await withServer({}, async (baseUrl, env, deps) => {
       const invalidJson = '{"object":';
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
@@ -305,11 +404,15 @@ try {
           message: 'Invalid JSON payload',
         },
       });
+
+      const malformedPayloadEvents = getObservabilityEvents(deps.observabilityEvents, 'malformed_payload');
+      assert.equal(malformedPayloadEvents.length, 1);
+      assert.equal(malformedPayloadEvents[0]?.reason, 'invalid_json');
     });
   });
 
   await runTest('POST /webhook enforces body size limit', async () => {
-    await withServer({ WEBHOOK_BODY_LIMIT: '32b' }, async (baseUrl, env) => {
+    await withServer({ WEBHOOK_BODY_LIMIT: '32b' }, async (baseUrl, env, deps) => {
       const payload = JSON.stringify({
         object: 'whatsapp_business_account',
         data: '1234567890123',
@@ -330,6 +433,10 @@ try {
           message: 'Webhook payload exceeds limit',
         },
       });
+
+      const malformedPayloadEvents = getObservabilityEvents(deps.observabilityEvents, 'malformed_payload');
+      assert.equal(malformedPayloadEvents.length, 1);
+      assert.equal(malformedPayloadEvents[0]?.reason, 'payload_too_large');
     });
   });
 
@@ -400,6 +507,83 @@ try {
       assert.equal(second.status, 200);
       assert.equal(deps.enqueuedJobs.length, 1);
       assert.equal(deps.enqueuedJobs[0]?.eventKey, 'message:wamid-123');
+
+      const duplicateHitEvents = getObservabilityEvents(deps.observabilityEvents, 'duplicate_hit');
+      assert.equal(duplicateHitEvents.length, 1);
+      assert.equal(duplicateHitEvents[0]?.eventKey, 'message:wamid-123');
+    });
+  });
+
+  await runTest('POST /webhook records enqueue failure metrics', async () => {
+    await withServer({}, async (baseUrl, env, deps) => {
+      deps.ingressQueue.enqueue = async () => {
+        throw new Error('queue unavailable');
+      };
+
+      const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+        },
+        body: payload,
+      });
+
+      assert.equal(res.status, 503);
+      assert.deepEqual(await res.json(), {
+        error: {
+          code: 'ENQUEUE_FAILED',
+          message: 'Failed to enqueue webhook event',
+        },
+      });
+
+      const enqueueFailureEvents = getObservabilityEvents(deps.observabilityEvents, 'enqueue_failure');
+      assert.equal(enqueueFailureEvents.length, 1);
+      assert.equal(enqueueFailureEvents[0]?.errorCode, 'ENQUEUE_FAILED');
+    });
+  });
+
+  await runTest('POST /webhook ACK p95 remains under 1.5s (smoke)', async () => {
+    await withServer({}, async (baseUrl, env) => {
+      const latenciesMs: number[] = [];
+
+      for (let index = 0; index < 40; index += 1) {
+        const payload = JSON.stringify({
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    messages: [{ id: `wamid-latency-${index}` }],
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        const startedAt = Date.now();
+        const res = await fetch(`${baseUrl}/webhook`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-hub-signature-256': signBody(payload, env.WHATSAPP_APP_SECRET!),
+          },
+          body: payload,
+        });
+        const elapsedMs = Date.now() - startedAt;
+
+        assert.equal(res.status, 200);
+        latenciesMs.push(elapsedMs);
+      }
+
+      const ordered = [...latenciesMs].sort((left, right) => left - right);
+      const percentileIndex = Math.max(0, Math.ceil(ordered.length * 0.95) - 1);
+      const p95 = ordered[percentileIndex];
+      assert.ok(typeof p95 === 'number');
+      assert.ok(p95 <= 1_500, `Expected ACK p95 <= 1500ms, received ${p95}ms`);
     });
   });
 } finally {
