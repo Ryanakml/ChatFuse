@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { createApp } from './index.js';
+import { INGRESS_JOB_SCHEMA_VERSION } from '@wa-chat/shared';
+import { createApp, createIngressQueueRetryJobOptions } from './index.js';
 const color = {
     reset: '\x1b[0m',
     green: '\x1b[32m',
@@ -126,7 +127,19 @@ async function withServer(envOverrides, fn) {
         observability: deps.observability,
         idempotencyTtlSeconds: 300,
     });
-    const server = app.listen(0);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve, reject) => {
+        const onError = (error) => {
+            server.off('listening', onListening);
+            reject(error);
+        };
+        const onListening = () => {
+            server.off('error', onError);
+            resolve();
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
+    });
     try {
         const address = server.address();
         assert.ok(address && typeof address === 'object' && 'port' in address);
@@ -137,8 +150,28 @@ async function withServer(envOverrides, fn) {
         server.close();
     }
 }
-console.log(`${color.cyan}API Endpoint Tests (E1 + E2 + E3 + E4)${color.reset}\n`);
+console.log(`${color.cyan}API Endpoint + Retry Config Tests (E1 + E2 + E3 + E4 + F2)${color.reset}\n`);
 try {
+    await runTest('createIngressQueueRetryJobOptions uses exponential backoff with jitter', () => {
+        const options = createIngressQueueRetryJobOptions({
+            transient: {
+                maxAttempts: 7,
+                backoffDelayMs: 2000,
+                backoffJitter: 0.4,
+            },
+            permanent: {
+                maxAttempts: 1,
+            },
+        });
+        assert.equal(options.attempts, 7);
+        assert.deepEqual(options.backoff, {
+            type: 'exponential',
+            delay: 2000,
+            jitter: 0.4,
+        });
+        assert.equal(options.removeOnComplete, true);
+        assert.equal(options.removeOnFail, false);
+    });
     await runTest('GET /health returns 200', async () => {
         await withServer({}, async (baseUrl) => {
             const res = await fetch(`${baseUrl}/health`);
@@ -219,6 +252,7 @@ try {
             assert.equal(res.headers.get('x-correlation-id'), correlationId);
             assert.equal(deps.enqueuedJobs.length, 1);
             assert.equal(typeof deps.enqueuedJobs[0]?.eventKey, 'string');
+            assert.equal(deps.enqueuedJobs[0]?.schemaVersion, INGRESS_JOB_SCHEMA_VERSION);
             const ingressEvents = getObservabilityEvents(deps.observabilityEvents, 'ingress_start');
             assert.equal(ingressEvents.length, 1);
             assert.equal(ingressEvents[0]?.context.correlationId, correlationId);

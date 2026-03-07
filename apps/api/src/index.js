@@ -1,13 +1,12 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { validateEnv } from '@wa-chat/config';
+import { resolveWorkerRetryPolicy, validateEnv } from '@wa-chat/config';
+import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Queue } from 'bullmq';
 import { createClient } from 'redis';
 const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24;
-const INGRESS_QUEUE_NAME = 'wa-webhook-ingress';
-const INGRESS_JOB_NAME = 'ingress-webhook-event';
 const createTraceId = () => randomBytes(16).toString('hex');
 const createCorrelationId = () => randomBytes(12).toString('hex');
 const computeRate = (count, total) => {
@@ -224,13 +223,20 @@ export const createRedisIdempotencyStore = (redisUrl) => {
         },
     };
 };
-export const createBullMqIngressQueue = (redisUrl) => {
+export const createIngressQueueRetryJobOptions = (retryPolicy) => ({
+    attempts: retryPolicy.transient.maxAttempts,
+    backoff: {
+        type: 'exponential',
+        delay: retryPolicy.transient.backoffDelayMs,
+        jitter: retryPolicy.transient.backoffJitter,
+    },
+    removeOnComplete: true,
+    removeOnFail: false,
+});
+export const createBullMqIngressQueue = (redisUrl, retryPolicy = resolveWorkerRetryPolicy({})) => {
     const queue = new Queue(INGRESS_QUEUE_NAME, {
         connection: { url: redisUrl },
-        defaultJobOptions: {
-            removeOnComplete: true,
-            removeOnFail: false,
-        },
+        defaultJobOptions: createIngressQueueRetryJobOptions(retryPolicy),
     });
     return {
         enqueue: async (job) => {
@@ -240,6 +246,7 @@ export const createBullMqIngressQueue = (redisUrl) => {
 };
 export const createApp = (runtimeEnv, options = {}) => {
     const env = validateEnv(runtimeEnv);
+    const retryPolicy = resolveWorkerRetryPolicy(env);
     const app = express();
     const isDevelopment = runtimeEnv.NODE_ENV === 'development';
     const allowInsecureHttp = runtimeEnv.ALLOW_INSECURE_HTTP === 'true';
@@ -257,7 +264,7 @@ export const createApp = (runtimeEnv, options = {}) => {
     const idempotencyTtlSeconds = options.idempotencyTtlSeconds ??
         parseNumber(runtimeEnv.WEBHOOK_IDEMPOTENCY_TTL_SECONDS, DEFAULT_IDEMPOTENCY_TTL_SECONDS);
     const idempotencyStore = options.idempotencyStore ?? createRedisIdempotencyStore(env.REDIS_URL);
-    const ingressQueue = options.ingressQueue ?? createBullMqIngressQueue(env.REDIS_URL);
+    const ingressQueue = options.ingressQueue ?? createBullMqIngressQueue(env.REDIS_URL, retryPolicy);
     const observability = options.observability ?? createDefaultIngressObservability();
     const adminAuthHeader = runtimeEnv.ADMIN_AUTH_HEADER?.trim() || 'x-wa-user';
     const adminRoleHeader = runtimeEnv.ADMIN_ROLE_HEADER?.trim() || 'x-wa-role';
@@ -447,11 +454,10 @@ export const createApp = (runtimeEnv, options = {}) => {
             return;
         }
         try {
-            await ingressQueue.enqueue({
+            await ingressQueue.enqueue(createIngressJobPayload({
                 eventKey,
                 payload: coerceJsonValue(payload),
-                receivedAt: new Date().toISOString(),
-            });
+            }));
             observability.onEnqueueSuccess(ingressContext, {
                 eventKey,
             });

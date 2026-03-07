@@ -1,18 +1,19 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { validateEnv } from '@wa-chat/config';
+import { resolveWorkerRetryPolicy, type WorkerRetryPolicy, validateEnv } from '@wa-chat/config';
+import {
+  INGRESS_JOB_NAME,
+  INGRESS_QUEUE_NAME,
+  createIngressJobPayload,
+  type IngressJobPayload,
+  type JsonValue,
+} from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Queue } from 'bullmq';
 import { createClient } from 'redis';
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-
-export type IngressJobPayload = {
-  eventKey: string;
-  payload: JsonValue;
-  receivedAt: string;
-};
+export type { IngressJobPayload } from '@wa-chat/shared';
 
 export type IngressTraceContext = {
   traceId: string;
@@ -68,8 +69,6 @@ type AppDependencies = {
 type AppOptions = Partial<AppDependencies>;
 
 const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24;
-const INGRESS_QUEUE_NAME = 'wa-webhook-ingress';
-const INGRESS_JOB_NAME = 'ingress-webhook-event';
 
 type IngressMetrics = {
   total: number;
@@ -338,13 +337,24 @@ export const createRedisIdempotencyStore = (redisUrl: string): IdempotencyStore 
   };
 };
 
-export const createBullMqIngressQueue = (redisUrl: string): IngressQueue => {
+export const createIngressQueueRetryJobOptions = (retryPolicy: WorkerRetryPolicy) => ({
+  attempts: retryPolicy.transient.maxAttempts,
+  backoff: {
+    type: 'exponential' as const,
+    delay: retryPolicy.transient.backoffDelayMs,
+    jitter: retryPolicy.transient.backoffJitter,
+  },
+  removeOnComplete: true,
+  removeOnFail: false,
+});
+
+export const createBullMqIngressQueue = (
+  redisUrl: string,
+  retryPolicy: WorkerRetryPolicy = resolveWorkerRetryPolicy({}),
+): IngressQueue => {
   const queue = new Queue(INGRESS_QUEUE_NAME, {
     connection: { url: redisUrl },
-    defaultJobOptions: {
-      removeOnComplete: true,
-      removeOnFail: false,
-    },
+    defaultJobOptions: createIngressQueueRetryJobOptions(retryPolicy),
   });
 
   return {
@@ -356,6 +366,7 @@ export const createBullMqIngressQueue = (redisUrl: string): IngressQueue => {
 
 export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {}) => {
   const env = validateEnv(runtimeEnv);
+  const retryPolicy = resolveWorkerRetryPolicy(env);
   const app = express();
   const isDevelopment = runtimeEnv.NODE_ENV === 'development';
   const allowInsecureHttp = runtimeEnv.ALLOW_INSECURE_HTTP === 'true';
@@ -374,7 +385,7 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
     options.idempotencyTtlSeconds ??
     parseNumber(runtimeEnv.WEBHOOK_IDEMPOTENCY_TTL_SECONDS, DEFAULT_IDEMPOTENCY_TTL_SECONDS);
   const idempotencyStore = options.idempotencyStore ?? createRedisIdempotencyStore(env.REDIS_URL);
-  const ingressQueue = options.ingressQueue ?? createBullMqIngressQueue(env.REDIS_URL);
+  const ingressQueue = options.ingressQueue ?? createBullMqIngressQueue(env.REDIS_URL, retryPolicy);
   const observability = options.observability ?? createDefaultIngressObservability();
   const adminAuthHeader = runtimeEnv.ADMIN_AUTH_HEADER?.trim() || 'x-wa-user';
   const adminRoleHeader = runtimeEnv.ADMIN_ROLE_HEADER?.trim() || 'x-wa-role';
@@ -562,74 +573,81 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
     res.status(403).json({ error: 'Verification failed' });
   });
 
-  app.post('/webhook', attachIngressTraceContext, parseWebhookJson, applyWebhookRateLimit, async (req, res) => {
-    const webhookRequest = req as WebhookRequest;
-    const ingressContext = getIngressTraceContext(req);
-    const signatureHeader = req.header('x-hub-signature-256') || '';
+  app.post(
+    '/webhook',
+    attachIngressTraceContext,
+    parseWebhookJson,
+    applyWebhookRateLimit,
+    async (req, res) => {
+      const webhookRequest = req as WebhookRequest;
+      const ingressContext = getIngressTraceContext(req);
+      const signatureHeader = req.header('x-hub-signature-256') || '';
 
-    if (!webhookRequest.rawBody || !signatureHeader) {
-      observability.onVerificationFailure(ingressContext, {
-        reason: 'missing_signature',
-      });
-      sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Missing WhatsApp signature');
-      return;
-    }
+      if (!webhookRequest.rawBody || !signatureHeader) {
+        observability.onVerificationFailure(ingressContext, {
+          reason: 'missing_signature',
+        });
+        sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Missing WhatsApp signature');
+        return;
+      }
 
-    if (!isValidWhatsappSignature(webhookRequest.rawBody, signatureHeader)) {
-      observability.onVerificationFailure(ingressContext, {
-        reason: 'invalid_signature',
-      });
-      sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Invalid WhatsApp signature');
-      return;
-    }
+      if (!isValidWhatsappSignature(webhookRequest.rawBody, signatureHeader)) {
+        observability.onVerificationFailure(ingressContext, {
+          reason: 'invalid_signature',
+        });
+        sendWebhookError(res, 401, 'INVALID_SIGNATURE', 'Invalid WhatsApp signature');
+        return;
+      }
 
-    const payload = req.body;
-    if (
-      typeof payload !== 'object' ||
-      payload === null ||
-      Array.isArray(payload) ||
-      typeof payload.object !== 'string'
-    ) {
-      observability.onMalformedPayload(ingressContext, {
-        reason: 'invalid_structure',
-      });
-      sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid webhook payload');
-      return;
-    }
+      const payload = req.body;
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        Array.isArray(payload) ||
+        typeof payload.object !== 'string'
+      ) {
+        observability.onMalformedPayload(ingressContext, {
+          reason: 'invalid_structure',
+        });
+        sendWebhookError(res, 400, 'MALFORMED_PAYLOAD', 'Invalid webhook payload');
+        return;
+      }
 
-    const eventKey = extractWebhookEventKey(payload);
-    const dedupeKey = `idempotency:webhook:${eventKey}`;
+      const eventKey = extractWebhookEventKey(payload);
+      const dedupeKey = `idempotency:webhook:${eventKey}`;
 
-    const firstSeen = await idempotencyStore.setIfNotExists(dedupeKey, idempotencyTtlSeconds);
-    if (!firstSeen) {
-      observability.onDuplicateHit(ingressContext, {
-        eventKey,
-      });
+      const firstSeen = await idempotencyStore.setIfNotExists(dedupeKey, idempotencyTtlSeconds);
+      if (!firstSeen) {
+        observability.onDuplicateHit(ingressContext, {
+          eventKey,
+        });
+        res.status(200).json({ ok: true });
+        return;
+      }
+
+      try {
+        await ingressQueue.enqueue(
+          createIngressJobPayload({
+            eventKey,
+            payload: coerceJsonValue(payload),
+          }),
+        );
+        observability.onEnqueueSuccess(ingressContext, {
+          eventKey,
+        });
+      } catch {
+        await idempotencyStore.delete(dedupeKey);
+        observability.onEnqueueFailure(ingressContext, {
+          eventKey,
+          errorCode: 'ENQUEUE_FAILED',
+        });
+        sendWebhookError(res, 503, 'ENQUEUE_FAILED', 'Failed to enqueue webhook event');
+        return;
+      }
+
       res.status(200).json({ ok: true });
-      return;
-    }
-
-    try {
-      await ingressQueue.enqueue({
-        eventKey,
-        payload: coerceJsonValue(payload),
-        receivedAt: new Date().toISOString(),
-      });
-      observability.onEnqueueSuccess(ingressContext, {
-        eventKey,
-      });
-    } catch {
-      await idempotencyStore.delete(dedupeKey);
-      observability.onEnqueueFailure(ingressContext, {
-        eventKey,
-        errorCode: 'ENQUEUE_FAILED',
-      });
-      sendWebhookError(res, 503, 'ENQUEUE_FAILED', 'Failed to enqueue webhook event');
-      return;
-    }
-
-    res.status(200).json({ ok: true });
-  });
+    },
+  );
 
   app.get('/admin/health', enforceAdminAccess, (_req, res) => {
     res.json({ ok: true });

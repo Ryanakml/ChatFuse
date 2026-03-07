@@ -1,11 +1,6 @@
-type JsonValue = null | boolean | number | string | JsonValue[] | {
-    [key: string]: JsonValue;
-};
-export type IngressJobPayload = {
-    eventKey: string;
-    payload: JsonValue;
-    receivedAt: string;
-};
+import { type WorkerRetryPolicy } from '@wa-chat/config';
+import { type IngressJobPayload } from '@wa-chat/shared';
+export type { IngressJobPayload } from '@wa-chat/shared';
 export type IngressTraceContext = {
     traceId: string;
     correlationId: string;
@@ -50,8 +45,17 @@ type AppDependencies = {
 };
 type AppOptions = Partial<AppDependencies>;
 export declare const createRedisIdempotencyStore: (redisUrl: string) => IdempotencyStore;
-export declare const createBullMqIngressQueue: (redisUrl: string) => IngressQueue;
+export declare const createIngressQueueRetryJobOptions: (retryPolicy: WorkerRetryPolicy) => {
+    attempts: number;
+    backoff: {
+        type: "exponential";
+        delay: number;
+        jitter: number;
+    };
+    removeOnComplete: boolean;
+    removeOnFail: boolean;
+};
+export declare const createBullMqIngressQueue: (redisUrl: string, retryPolicy?: WorkerRetryPolicy) => IngressQueue;
 export declare const createApp: (runtimeEnv: NodeJS.ProcessEnv, options?: AppOptions) => import("express-serve-static-core").Express;
 export declare const startServer: (runtimeEnv: NodeJS.ProcessEnv) => import("node:http").Server<typeof import("node:http").IncomingMessage, typeof import("node:http").ServerResponse>;
-export {};
 //# sourceMappingURL=index.d.ts.map
