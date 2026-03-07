@@ -4,14 +4,12 @@ import {
   HumanMessagePromptTemplate,
 } from '@langchain/core/prompts';
 
-export const SYSTEM_ROLE_PROMPT = `You are a helpful and professional customer support agent for WA Chat.
-Your primary role is to assist users with their inquiries, provide relevant product or policy information, and help resolve issues.
+import { getSystemPrompt } from './system.js';
 
-Constraints:
-1. Do not fabricate or invent transactional claims, refund statuses, or stock levels.
-2. Maintain a professional, polite, and helpful tone at all times.
-3. If you do not have enough specific context to answer a question confidently, ask for clarification or state that you will escalate to a human agent.
-4. Adhere strictly to provided tool schemas and expected outputs.`;
+export * from './versioning.js';
+export * from './system.js';
+
+export const SYSTEM_ROLE_PROMPT = getSystemPrompt();
 
 export function createIntentClassificationPrompt(): ChatPromptTemplate {
   return ChatPromptTemplate.fromMessages([
