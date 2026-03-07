@@ -47,6 +47,10 @@ export const SupportTicketCreationSchema = z.object({
     .optional()
     .default('medium')
     .describe('The priority level of the ticket'),
+  idempotencyKey: z
+    .string()
+    .optional()
+    .describe('A unique key to prevent duplicate ticket creations (write-idempotency).'),
 });
 
 export type SupportTicketCreationInput = z.infer<typeof SupportTicketCreationSchema>;
