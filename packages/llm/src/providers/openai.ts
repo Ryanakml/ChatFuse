@@ -9,7 +9,7 @@ export interface OpenAIConfiguration {
 
 export function createOpenAIAdapter(configuration?: OpenAIConfiguration): ChatOpenAI {
   return new ChatOpenAI({
-    openAIApiKey: configuration?.apiKey ?? process.env.OPENAI_API_KEY,
+    openAIApiKey: configuration?.apiKey ?? process.env.OPENAI_API_KEY ?? 'dummy-key',
     modelName: configuration?.modelName ?? 'gpt-4o-mini',
     temperature: configuration?.temperature ?? 0,
     maxRetries: configuration?.maxRetries ?? 3,

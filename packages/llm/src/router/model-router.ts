@@ -1,4 +1,5 @@
 // removed BaseChatModel import
+import { z } from 'zod';
 import { RunnableWithFallbacks } from '@langchain/core/runnables';
 import { AIMessage } from '@langchain/core/messages';
 import { createOpenAIAdapter } from '../providers/openai.js';
@@ -28,6 +29,22 @@ export function createModelRouter(
   return primaryModel.withFallbacks({
     fallbacks: [fallbackModel],
   });
+}
+
+/**
+ * Creates a model router that enforces a Zod schema via native tool calling.
+ * Applies `.withStructuredOutput` to both primary and fallback models.
+ */
+export function createStructuredModelRouter<T>(
+  schema: z.ZodType<T>,
+  config?: ModelRouterConfig,
+): RunnableWithFallbacks<unknown, T> {
+  const primaryModel = createOpenAIAdapter(config?.primaryConfig).withStructuredOutput(schema);
+  const fallbackModel = createGeminiAdapter(config?.fallbackConfig).withStructuredOutput(schema);
+
+  return primaryModel.withFallbacks({
+    fallbacks: [fallbackModel],
+  }) as RunnableWithFallbacks<unknown, T>;
 }
 
 export interface TokenUsage {

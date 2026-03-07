@@ -31,3 +31,14 @@ export const StandardResponseSchema = z.object({
 export type StandardResponse = z.infer<typeof StandardResponseSchema>;
 
 export const standardResponseParser = StructuredOutputParser.fromZodSchema(StandardResponseSchema);
+
+// Agent Response Parser (for structured outputs via G5)
+export const StructuredOutputSchema = z.object({
+  content: z.string().describe('The main text response to the user'),
+  confidence: z.number().min(0).max(1).describe('Confidence score of the response (0.0 to 1.0)'),
+  escalate_flag: z
+    .boolean()
+    .describe('Whether the conversation should be escalated to a human agent'),
+});
+
+export type StructuredOutput = z.infer<typeof StructuredOutputSchema>;

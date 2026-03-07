@@ -1,4 +1,28 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { RunnableLambda } from '@langchain/core/runnables';
+
+vi.mock('../../router/model-router.js', () => {
+  return {
+    createStructuredModelRouter: vi.fn(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      RunnableLambda.from(async (promptValue: any) => {
+        const text = promptValue?.toString() || '';
+        let content = '';
+        if (text.includes('rag_path')) content = '[RAG RESPONSE]';
+        else if (text.includes('tool_path')) content = '[TOOL RESPONSE]';
+        else if (text.includes('escalation_path')) content = '[ESCALATION RESPONSE]';
+        else content = 'inappropriate'; // default fallback for clarify test
+
+        return {
+          content,
+          confidence: 0.9,
+          escalate_flag: false,
+        };
+      }),
+    ),
+  };
+});
+
 import { processMessage } from '../pipeline.js';
 
 describe('LangChain Orchestration Pipeline (G2)', () => {

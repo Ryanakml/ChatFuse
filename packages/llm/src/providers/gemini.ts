@@ -9,7 +9,7 @@ export interface GeminiConfiguration {
 
 export function createGeminiAdapter(configuration?: GeminiConfiguration): ChatGoogleGenerativeAI {
   return new ChatGoogleGenerativeAI({
-    apiKey: configuration?.apiKey ?? process.env.GEMINI_API_KEY ?? '',
+    apiKey: configuration?.apiKey ?? process.env.GEMINI_API_KEY ?? 'dummy-key',
     model: configuration?.modelName ?? 'gemini-1.5-flash',
     temperature: configuration?.temperature ?? 0,
     maxRetries: configuration?.maxRetries ?? 3,
