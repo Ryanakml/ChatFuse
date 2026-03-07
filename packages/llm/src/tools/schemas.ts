@@ -51,6 +51,10 @@ export const SupportTicketCreationSchema = z.object({
     .string()
     .optional()
     .describe('A unique key to prevent duplicate ticket creations (write-idempotency).'),
+  confirmed: z
+    .boolean()
+    .optional()
+    .describe('Set to true ONLY if the user has explicitly confirmed the ticket creation details.'),
 });
 
 export type SupportTicketCreationInput = z.infer<typeof SupportTicketCreationSchema>;

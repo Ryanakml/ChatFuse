@@ -102,6 +102,7 @@ describe('Tool Contracts and Schemas (I1)', () => {
       const resultStr = await supportTicketCreationTool.invoke({
         issueDescription: 'This is a valid long description.',
         category: 'general',
+        confirmed: true,
       });
       const result = JSON.parse(resultStr);
       expect(result.status).toBe('created');
