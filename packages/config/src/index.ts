@@ -1,5 +1,10 @@
 export const configPackageName = '@wa-chat/config';
 
+export const DEFAULT_WORKER_TRANSIENT_MAX_ATTEMPTS = 5;
+export const DEFAULT_WORKER_PERMANENT_MAX_ATTEMPTS = 1;
+export const DEFAULT_WORKER_RETRY_BACKOFF_DELAY_MS = 1_000;
+export const DEFAULT_WORKER_RETRY_BACKOFF_JITTER = 0.2;
+
 export const REQUIRED_ENV_VARS = [
   'NODE_ENV',
   'PORT',
@@ -30,11 +35,105 @@ export const OPTIONAL_ENV_VARS = [
   'WEBHOOK_IDEMPOTENCY_TTL_SECONDS',
   'WORKER_CONCURRENCY',
   'WORKER_JOB_TIMEOUT_MS',
+  'WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS',
+  'WORKER_RETRY_PERMANENT_MAX_ATTEMPTS',
+  'WORKER_RETRY_BACKOFF_DELAY_MS',
+  'WORKER_RETRY_BACKOFF_JITTER',
 ] as const;
 
 export type RequiredEnvVar = (typeof REQUIRED_ENV_VARS)[number];
 export type OptionalEnvVar = (typeof OPTIONAL_ENV_VARS)[number];
 export type RuntimeEnv = Record<RequiredEnvVar, string> & Partial<Record<OptionalEnvVar, string>>;
+
+export type WorkerRetryPolicy = {
+  transient: {
+    maxAttempts: number;
+    backoffDelayMs: number;
+    backoffJitter: number;
+  };
+  permanent: {
+    maxAttempts: number;
+  };
+};
+
+const parsePositiveInteger = (
+  value: string | undefined,
+  fallback: number,
+  environmentVariableName: string,
+) => {
+  if (!value || value.trim() === '') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${environmentVariableName} must be a positive integer`);
+  }
+
+  return parsed;
+};
+
+const parseJitter = (
+  value: string | undefined,
+  fallback: number,
+  environmentVariableName: string,
+) => {
+  if (!value || value.trim() === '') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`${environmentVariableName} must be a number between 0 and 1`);
+  }
+
+  return parsed;
+};
+
+export const resolveWorkerRetryPolicy = (env: {
+  WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS?: string;
+  WORKER_RETRY_PERMANENT_MAX_ATTEMPTS?: string;
+  WORKER_RETRY_BACKOFF_DELAY_MS?: string;
+  WORKER_RETRY_BACKOFF_JITTER?: string;
+}): WorkerRetryPolicy => {
+  const transientMaxAttempts = parsePositiveInteger(
+    env.WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS,
+    DEFAULT_WORKER_TRANSIENT_MAX_ATTEMPTS,
+    'WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS',
+  );
+  const permanentMaxAttempts = parsePositiveInteger(
+    env.WORKER_RETRY_PERMANENT_MAX_ATTEMPTS,
+    DEFAULT_WORKER_PERMANENT_MAX_ATTEMPTS,
+    'WORKER_RETRY_PERMANENT_MAX_ATTEMPTS',
+  );
+  const backoffDelayMs = parsePositiveInteger(
+    env.WORKER_RETRY_BACKOFF_DELAY_MS,
+    DEFAULT_WORKER_RETRY_BACKOFF_DELAY_MS,
+    'WORKER_RETRY_BACKOFF_DELAY_MS',
+  );
+  const backoffJitter = parseJitter(
+    env.WORKER_RETRY_BACKOFF_JITTER,
+    DEFAULT_WORKER_RETRY_BACKOFF_JITTER,
+    'WORKER_RETRY_BACKOFF_JITTER',
+  );
+
+  if (permanentMaxAttempts > transientMaxAttempts) {
+    throw new Error(
+      'WORKER_RETRY_PERMANENT_MAX_ATTEMPTS cannot be greater than WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS',
+    );
+  }
+
+  return {
+    transient: {
+      maxAttempts: transientMaxAttempts,
+      backoffDelayMs,
+      backoffJitter,
+    },
+    permanent: {
+      maxAttempts: permanentMaxAttempts,
+    },
+  };
+};
 
 export const validateEnv = (env: Record<string, string | undefined>): RuntimeEnv => {
   const missing = REQUIRED_ENV_VARS.filter((key) => {

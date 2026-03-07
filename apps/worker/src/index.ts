@@ -1,8 +1,14 @@
 import dotenv from 'dotenv';
-import { validateEnv } from '@wa-chat/config';
+import {
+  DEFAULT_WORKER_PERMANENT_MAX_ATTEMPTS,
+  DEFAULT_WORKER_TRANSIENT_MAX_ATTEMPTS,
+  resolveWorkerRetryPolicy,
+  validateEnv,
+} from '@wa-chat/config';
 import { INGRESS_QUEUE_NAME, type IngressJobPayload } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import {
+  classifyWorkerError,
   createIngressQueueWorker,
   type IngressJobProcessor,
   type WorkerPolicies,
@@ -13,6 +19,8 @@ dotenv.config();
 export const workerName = 'wa-chat-worker';
 export const DEFAULT_WORKER_CONCURRENCY = 10;
 export const DEFAULT_WORKER_JOB_TIMEOUT_MS = 30_000;
+export const DEFAULT_WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS = DEFAULT_WORKER_TRANSIENT_MAX_ATTEMPTS;
+export const DEFAULT_WORKER_RETRY_PERMANENT_MAX_ATTEMPTS = DEFAULT_WORKER_PERMANENT_MAX_ATTEMPTS;
 
 const parsePositiveInteger = (
   value: string | undefined,
@@ -35,19 +43,31 @@ export const resolveWorkerPolicies = (
   env: {
     WORKER_CONCURRENCY?: string;
     WORKER_JOB_TIMEOUT_MS?: string;
+    WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS?: string;
+    WORKER_RETRY_PERMANENT_MAX_ATTEMPTS?: string;
+    WORKER_RETRY_BACKOFF_DELAY_MS?: string;
+    WORKER_RETRY_BACKOFF_JITTER?: string;
   },
-): WorkerPolicies => ({
-  concurrency: parsePositiveInteger(
-    env.WORKER_CONCURRENCY,
-    DEFAULT_WORKER_CONCURRENCY,
-    'WORKER_CONCURRENCY',
-  ),
-  jobTimeoutMs: parsePositiveInteger(
-    env.WORKER_JOB_TIMEOUT_MS,
-    DEFAULT_WORKER_JOB_TIMEOUT_MS,
-    'WORKER_JOB_TIMEOUT_MS',
-  ),
-});
+): WorkerPolicies => {
+  const retryPolicy = resolveWorkerRetryPolicy(env);
+
+  return {
+    concurrency: parsePositiveInteger(
+      env.WORKER_CONCURRENCY,
+      DEFAULT_WORKER_CONCURRENCY,
+      'WORKER_CONCURRENCY',
+    ),
+    jobTimeoutMs: parsePositiveInteger(
+      env.WORKER_JOB_TIMEOUT_MS,
+      DEFAULT_WORKER_JOB_TIMEOUT_MS,
+      'WORKER_JOB_TIMEOUT_MS',
+    ),
+    retry: {
+      transientMaxAttempts: retryPolicy.transient.maxAttempts,
+      permanentMaxAttempts: retryPolicy.permanent.maxAttempts,
+    },
+  };
+};
 
 export type WorkerService = {
   policies: WorkerPolicies;
@@ -94,6 +114,8 @@ export const startWorker = (
         queueName: INGRESS_QUEUE_NAME,
         concurrency: policies.concurrency,
         jobTimeoutMs: policies.jobTimeoutMs,
+        transientMaxAttempts: policies.retry.transientMaxAttempts,
+        permanentMaxAttempts: policies.retry.permanentMaxAttempts,
       }),
     );
   });
@@ -111,6 +133,16 @@ export const startWorker = (
   });
 
   worker.on('failed', (job, error: Error) => {
+    const classifiedError = classifyWorkerError(error);
+    const attemptsMade = typeof job?.attemptsMade === 'number' ? job.attemptsMade : null;
+    const maxAttempts = typeof job?.opts.attempts === 'number' ? job.opts.attempts : null;
+    const willRetry =
+      attemptsMade !== null && maxAttempts !== null
+        ? classifiedError.errorClass === 'permanent'
+          ? attemptsMade < policies.retry.permanentMaxAttempts
+          : attemptsMade < maxAttempts
+        : null;
+
     console.error(
       JSON.stringify({
         ts: new Date().toISOString(),
@@ -120,6 +152,10 @@ export const startWorker = (
         queueName: INGRESS_QUEUE_NAME,
         jobId: job?.id ?? null,
         jobName: job?.name ?? null,
+        errorClass: classifiedError.errorClass,
+        attemptsMade,
+        maxAttempts,
+        willRetry,
         message: error.message,
       }),
     );

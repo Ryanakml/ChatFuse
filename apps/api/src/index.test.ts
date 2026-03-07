@@ -8,7 +8,7 @@ import type {
   IngressQueue,
   IngressTraceContext,
 } from './index.js';
-import { createApp } from './index.js';
+import { createApp, createIngressQueueRetryJobOptions } from './index.js';
 
 const color = {
   reset: '\x1b[0m',
@@ -194,9 +194,31 @@ async function withServer<T>(
   }
 }
 
-console.log(`${color.cyan}API Endpoint Tests (E1 + E2 + E3 + E4)${color.reset}\n`);
+console.log(`${color.cyan}API Endpoint + Retry Config Tests (E1 + E2 + E3 + E4 + F2)${color.reset}\n`);
 
 try {
+  await runTest('createIngressQueueRetryJobOptions uses exponential backoff with jitter', () => {
+    const options = createIngressQueueRetryJobOptions({
+      transient: {
+        maxAttempts: 7,
+        backoffDelayMs: 2000,
+        backoffJitter: 0.4,
+      },
+      permanent: {
+        maxAttempts: 1,
+      },
+    });
+
+    assert.equal(options.attempts, 7);
+    assert.deepEqual(options.backoff, {
+      type: 'exponential',
+      delay: 2000,
+      jitter: 0.4,
+    });
+    assert.equal(options.removeOnComplete, true);
+    assert.equal(options.removeOnFail, false);
+  });
+
   await runTest('GET /health returns 200', async () => {
     await withServer({}, async (baseUrl) => {
       const res = await fetch(`${baseUrl}/health`);
