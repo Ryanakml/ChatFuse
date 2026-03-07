@@ -1,4 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
+vi.mock('@supabase/supabase-js', () => ({ createClient: vi.fn() }));
+vi.mock('../../rag/vectorstore.js', () => ({
+  getVectorStore: vi.fn(),
+  searchKnowledge: vi.fn().mockResolvedValue([[{ pageContent: 'mock content' }, 0.9]]),
+}));
+vi.mock('../../rag/embeddings.js', () => ({
+  getEmbeddings: vi.fn().mockReturnValue({
+    embedDocuments: vi.fn().mockResolvedValue([[0.1]]),
+    embedQuery: vi.fn().mockResolvedValue([0.1]),
+  }),
+}));
 import { RunnableLambda } from '@langchain/core/runnables';
 
 vi.mock('../../router/model-router.js', () => {

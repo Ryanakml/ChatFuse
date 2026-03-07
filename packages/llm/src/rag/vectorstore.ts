@@ -89,3 +89,28 @@ export async function addChunksToVectorStore(
 
   await vectorStore.addDocuments(formattedDocs);
 }
+
+export interface RetrievalFilters {
+  // Support metadata filters like locale, productLine, policyVersion, etc.
+  [key: string]: unknown;
+}
+
+/**
+ * Perform a similarity search on the vector store with a score threshold and metadata filters.
+ */
+export async function searchKnowledge(
+  vectorStore: SupabaseVectorStore,
+  query: string,
+  k: number = 4,
+  threshold: number = 0.7,
+  filters?: RetrievalFilters,
+): Promise<[Document, number][]> {
+  // Translate filters to what SupabaseVectorStore expects for its match_knowledge_chunks RPC
+  // The official LangChain SupabaseVectorStore accepts an object which maps to metadata->>key=value
+  const searchFilter = filters && Object.keys(filters).length > 0 ? filters : undefined;
+
+  const results = await vectorStore.similaritySearchWithScore(query, k, searchFilter);
+
+  // Filter out any results that do not meet the confidence threshold
+  return results.filter((result) => result[1] >= threshold);
+}
