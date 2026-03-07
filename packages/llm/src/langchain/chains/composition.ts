@@ -9,13 +9,19 @@ import { StructuredOutputSchema } from '../../parsers/index.js';
 import type { AgentState } from '../types.js';
 
 const SYSTEM_PROMPT = `You are a helpful WhatsApp AI assistant.
-Your goal is to compose a final response based on the agent's routing decision and the user's input.
-You must return your response following the exact required schema.`;
+Your goal is to compose a final response based on the agent's routing decision, the user's input, and the provided context.
+You must return your response following the exact required schema.
+CRITICAL: If you are answering based on context (RAG route), your answer must be STRICTLY GROUNDED in the provided context. Do not make up facts or claims that are not supported by the context.
+If the provided context is insufficient to confidently answer the user's question, you must respond with exactly "I need clarification" and set the escalate_flag to true.`;
 
 const compositionPrompt = ChatPromptTemplate.fromMessages([
   SystemMessagePromptTemplate.fromTemplate(SYSTEM_PROMPT),
   HumanMessagePromptTemplate.fromTemplate(`Routing Decision: {route}
 User Input: {normalizedInput}
+Retrieved Context:
+{retrievedContext}
+Citations Context:
+{citationsText}
 
 Please provide the best response to the user.`),
 ]);
@@ -33,10 +39,18 @@ export const compositionChain = RunnableLambda.from(async (state: AgentState) =>
     // Link the prompt to the structured output router
     const chain = compositionPrompt.pipe(modelRouter);
 
+    // Format citations to pass to prompt if available
+    const citationsText =
+      state.citations && state.citations.length > 0
+        ? JSON.stringify(state.citations, null, 2)
+        : 'No citations available';
+
     // Invoke the chain, expecting it to return the z.infer<typeof StructuredOutputSchema> type
     const structuredOutput = await chain.invoke({
       route: state.route || 'unknown',
       normalizedInput: state.normalizedInput || '',
+      retrievedContext: state.retrievedContext || 'No context available',
+      citationsText,
     });
 
     return {
