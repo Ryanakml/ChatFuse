@@ -169,16 +169,14 @@ export const createBullMqIngressDlqQueue = (redisUrl: string): IngressDlqQueue =
   };
 };
 
-export const resolveWorkerPolicies = (
-  env: {
-    WORKER_CONCURRENCY?: string;
-    WORKER_JOB_TIMEOUT_MS?: string;
-    WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS?: string;
-    WORKER_RETRY_PERMANENT_MAX_ATTEMPTS?: string;
-    WORKER_RETRY_BACKOFF_DELAY_MS?: string;
-    WORKER_RETRY_BACKOFF_JITTER?: string;
-  },
-): WorkerPolicies => {
+export const resolveWorkerPolicies = (env: {
+  WORKER_CONCURRENCY?: string;
+  WORKER_JOB_TIMEOUT_MS?: string;
+  WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS?: string;
+  WORKER_RETRY_PERMANENT_MAX_ATTEMPTS?: string;
+  WORKER_RETRY_BACKOFF_DELAY_MS?: string;
+  WORKER_RETRY_BACKOFF_JITTER?: string;
+}): WorkerPolicies => {
   const retryPolicy = resolveWorkerRetryPolicy(env);
 
   return {
@@ -222,7 +220,8 @@ export const buildIngressDlqPayloadFromFailure = (input: {
   error: Error;
   failedAt?: string;
 }): IngressDlqJobPayload => {
-  const fallbackJobId = input.job.id === undefined || input.job.id === null ? 'unknown' : String(input.job.id);
+  const fallbackJobId =
+    input.job.id === undefined || input.job.id === null ? 'unknown' : String(input.job.id);
 
   return createIngressDlqJobPayload({
     eventKey: extractEventKey(input.job.data, fallbackJobId),
@@ -360,6 +359,38 @@ export const startWorker = (
     processor,
   });
 
+  const mainQueue = new Queue(INGRESS_QUEUE_NAME, {
+    connection: { url: env.REDIS_URL },
+  });
+
+  const queueDepthMetricsInterval = setInterval(() => {
+    mainQueue
+      .getJobCounts()
+      .then((counts) => {
+        console.log(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            level: 'info',
+            event: 'worker.queue.depth',
+            worker: workerName,
+            queueName: INGRESS_QUEUE_NAME,
+            counts,
+          }),
+        );
+      })
+      .catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            level: 'error',
+            event: 'worker.queue.depth.error',
+            worker: workerName,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      });
+  }, 60000);
+
   worker.on('ready', () => {
     console.log(
       JSON.stringify({
@@ -389,7 +420,31 @@ export const startWorker = (
     );
   });
 
+  worker.on('completed', (job) => {
+    const processedOn = job.processedOn;
+    const finishedOn = job.finishedOn || Date.now();
+    const processingLatencyMs = processedOn ? finishedOn - processedOn : null;
+
+    console.log(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level: 'info',
+        event: 'worker.job.completed',
+        worker: workerName,
+        queueName: INGRESS_QUEUE_NAME,
+        jobId: job?.id ?? null,
+        jobName: job?.name ?? null,
+        attemptsMade: job?.attemptsMade ?? 0,
+        processingLatencyMs,
+      }),
+    );
+  });
+
   worker.on('failed', (job, error: Error) => {
+    const processedOn = job?.processedOn;
+    const finishedOn = job?.finishedOn || Date.now();
+    const processingLatencyMs = processedOn ? finishedOn - processedOn : null;
+
     void routeFailedIngressJobToDlq({
       job,
       error,
@@ -397,26 +452,56 @@ export const startWorker = (
       dlqQueue,
     })
       .then((routeResult) => {
-        console.error(
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            level: 'error',
-            event: 'worker.job.failed',
-            worker: workerName,
-            queueName: INGRESS_QUEUE_NAME,
-            dlqQueueName: INGRESS_DLQ_QUEUE_NAME,
-            jobId: job?.id ?? null,
-            jobName: job?.name ?? null,
-            errorClass: routeResult.errorClass,
-            attemptsMade: routeResult.attemptsMade,
-            maxAttempts: routeResult.maxAttempts,
-            willRetry: routeResult.willRetry,
-            routedToDlq: routeResult.routedToDlq,
-            dlqJobId: routeResult.dlqJobId,
-            dlqRouteError: routeResult.dlqRouteError,
-            message: error.message,
-          }),
-        );
+        const baseLogData = {
+          ts: new Date().toISOString(),
+          worker: workerName,
+          queueName: INGRESS_QUEUE_NAME,
+          dlqQueueName: INGRESS_DLQ_QUEUE_NAME,
+          jobId: job?.id ?? null,
+          jobName: job?.name ?? null,
+          errorClass: routeResult.errorClass,
+          attemptsMade: routeResult.attemptsMade,
+          maxAttempts: routeResult.maxAttempts,
+          willRetry: routeResult.willRetry,
+          routedToDlq: routeResult.routedToDlq,
+          dlqJobId: routeResult.dlqJobId,
+          dlqRouteError: routeResult.dlqRouteError,
+          processingLatencyMs,
+          message: error.message,
+        };
+
+        if (routeResult.willRetry) {
+          console.warn(
+            JSON.stringify({
+              ...baseLogData,
+              level: 'warn',
+              event: 'worker.job.retried',
+            }),
+          );
+        } else {
+          console.error(
+            JSON.stringify({
+              ...baseLogData,
+              level: 'error',
+              event: 'worker.job.failed',
+            }),
+          );
+        }
+
+        if (routeResult.routedToDlq) {
+          console.error(
+            JSON.stringify({
+              ts: baseLogData.ts,
+              level: 'error',
+              event: 'worker.dlq.inflow.alert',
+              worker: workerName,
+              jobId: baseLogData.jobId,
+              dlqJobId: baseLogData.dlqJobId,
+              reason: 'retries_exhausted',
+              message: 'Job exhausted all retries and was routed to DLQ',
+            }),
+          );
+        }
       })
       .catch((routeError: unknown) => {
         console.error(
@@ -432,7 +517,9 @@ export const startWorker = (
   });
 
   const close = async () => {
+    clearInterval(queueDepthMetricsInterval);
     await worker.close();
+    await mainQueue.close();
     await dlqQueue.close();
   };
 
