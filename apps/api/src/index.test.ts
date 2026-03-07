@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { INGRESS_JOB_SCHEMA_VERSION } from '@wa-chat/shared';
 import type {
   IdempotencyStore,
   IngressJobPayload,
@@ -167,7 +168,21 @@ async function withServer<T>(
     observability: deps.observability,
     idempotencyTtlSeconds: 300,
   });
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+
+    const onListening = () => {
+      server.off('error', onError);
+      resolve();
+    };
+
+    server.once('error', onError);
+    server.once('listening', onListening);
+  });
 
   try {
     const address = server.address();
@@ -292,6 +307,7 @@ try {
       assert.equal(res.headers.get('x-correlation-id'), correlationId);
       assert.equal(deps.enqueuedJobs.length, 1);
       assert.equal(typeof deps.enqueuedJobs[0]?.eventKey, 'string');
+      assert.equal(deps.enqueuedJobs[0]?.schemaVersion, INGRESS_JOB_SCHEMA_VERSION);
 
       const ingressEvents = getObservabilityEvents(deps.observabilityEvents, 'ingress_start');
       assert.equal(ingressEvents.length, 1);

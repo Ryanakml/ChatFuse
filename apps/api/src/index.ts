@@ -1,18 +1,19 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { validateEnv } from '@wa-chat/config';
+import {
+  INGRESS_JOB_NAME,
+  INGRESS_QUEUE_NAME,
+  createIngressJobPayload,
+  type IngressJobPayload,
+  type JsonValue,
+} from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Queue } from 'bullmq';
 import { createClient } from 'redis';
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-
-export type IngressJobPayload = {
-  eventKey: string;
-  payload: JsonValue;
-  receivedAt: string;
-};
+export type { IngressJobPayload } from '@wa-chat/shared';
 
 export type IngressTraceContext = {
   traceId: string;
@@ -68,8 +69,6 @@ type AppDependencies = {
 type AppOptions = Partial<AppDependencies>;
 
 const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24;
-const INGRESS_QUEUE_NAME = 'wa-webhook-ingress';
-const INGRESS_JOB_NAME = 'ingress-webhook-event';
 
 type IngressMetrics = {
   total: number;
@@ -610,11 +609,12 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
     }
 
     try {
-      await ingressQueue.enqueue({
-        eventKey,
-        payload: coerceJsonValue(payload),
-        receivedAt: new Date().toISOString(),
-      });
+      await ingressQueue.enqueue(
+        createIngressJobPayload({
+          eventKey,
+          payload: coerceJsonValue(payload),
+        }),
+      );
       observability.onEnqueueSuccess(ingressContext, {
         eventKey,
       });

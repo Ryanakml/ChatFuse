@@ -5,14 +5,17 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "npm --workspace @wa-chat/config run build && tsc",
+    "build": "npm --workspace @wa-chat/config run build && npm --workspace @wa-chat/shared run build && tsc",
     "dev": "tsx watch src/index.ts",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "start": "node dist/index.js",
-    "typecheck": "npm --workspace @wa-chat/config run build && tsc --noEmit"
+    "test": "npm --workspace @wa-chat/config run build && npm --workspace @wa-chat/shared run build && node --import tsx src/index.test.ts",
+    "typecheck": "npm --workspace @wa-chat/config run build && npm --workspace @wa-chat/shared run build && tsc --noEmit"
   },
   "dependencies": {
     "@wa-chat/config": "^0.0.1",
+    "@wa-chat/shared": "^0.0.1",
+    "bullmq": "^5.58.0",
     "dotenv": "^16.6.1"
   }
 }

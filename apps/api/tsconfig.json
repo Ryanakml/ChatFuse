@@ -13,7 +13,8 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@wa-chat/config": ["../../packages/config/src/index.ts"]
+      "@wa-chat/config": ["../../packages/config/src/index.ts"],
+      "@wa-chat/shared": ["../../packages/shared/src/index.ts"]
     },
     // For nodejs:
     // "lib": ["esnext"],
