@@ -7,7 +7,10 @@ import {
   DEFAULT_WORKER_JOB_TIMEOUT_MS,
   DEFAULT_WORKER_RETRY_PERMANENT_MAX_ATTEMPTS,
   DEFAULT_WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS,
+  buildIngressDlqPayloadFromFailure,
+  resolveWillRetry,
   resolveWorkerPolicies,
+  routeFailedIngressJobToDlq,
 } from './index.js';
 import { WorkerJobTimeoutError, WorkerPermanentError, runIngressJob } from './queue/consumer.js';
 
@@ -54,7 +57,7 @@ const createTestPolicies = (overrides?: {
   },
 });
 
-console.log(`${color.cyan}Worker Foundation + Retry Tests (F1 + F2)${color.reset}\n`);
+console.log(`${color.cyan}Worker Foundation + Retry + DLQ Tests (F1 + F2 + F3)${color.reset}\n`);
 
 try {
   await runTest('resolveWorkerPolicies uses defaults when optional env is not set', () => {
@@ -279,6 +282,206 @@ try {
         !(error instanceof UnrecoverableError) &&
         error.message === 'temporary downstream outage',
     );
+  });
+
+  await runTest('resolveWillRetry applies class-specific attempt policies', () => {
+    assert.equal(
+      resolveWillRetry({
+        errorClass: 'permanent',
+        attemptsMade: 1,
+        maxAttempts: 5,
+        permanentMaxAttempts: 2,
+      }),
+      true,
+    );
+    assert.equal(
+      resolveWillRetry({
+        errorClass: 'permanent',
+        attemptsMade: 2,
+        maxAttempts: 5,
+        permanentMaxAttempts: 2,
+      }),
+      false,
+    );
+    assert.equal(
+      resolveWillRetry({
+        errorClass: 'transient',
+        attemptsMade: 5,
+        maxAttempts: 5,
+        permanentMaxAttempts: 2,
+      }),
+      false,
+    );
+    assert.equal(
+      resolveWillRetry({
+        errorClass: 'transient',
+        attemptsMade: null,
+        maxAttempts: 5,
+        permanentMaxAttempts: 2,
+      }),
+      null,
+    );
+  });
+
+  await runTest('buildIngressDlqPayloadFromFailure captures full failure context', () => {
+    const payload = buildIngressDlqPayloadFromFailure({
+      job: {
+        id: 'job-1',
+        name: INGRESS_JOB_NAME,
+        queueName: 'wa-webhook-ingress',
+        data: createIngressJobPayload({
+          eventKey: 'message:wamid-dlq-001',
+          payload: {
+            object: 'whatsapp_business_account',
+          },
+          receivedAt: '2026-03-07T00:00:00.000Z',
+        }),
+        attemptsMade: 5,
+        opts: {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 1200,
+            jitter: 0.25,
+          },
+        },
+        timestamp: 1_000,
+        processedOn: 2_000,
+        finishedOn: 3_000,
+      },
+      errorClass: 'transient',
+      error: new Error('downstream unavailable'),
+      failedAt: '2026-03-07T10:00:00.000Z',
+    });
+
+    assert.equal(payload.eventKey, 'message:wamid-dlq-001');
+    assert.equal(payload.originalJob.id, 'job-1');
+    assert.equal(payload.originalJob.attemptsMade, 5);
+    assert.equal(payload.originalJob.maxAttempts, 5);
+    assert.equal(payload.originalJob.retry.attempts, 5);
+    assert.equal(payload.originalJob.retry.backoffType, 'exponential');
+    assert.equal(payload.originalJob.retry.backoffDelayMs, 1200);
+    assert.equal(payload.originalJob.retry.backoffJitter, 0.25);
+    assert.equal(payload.failure.reason, 'transient_retries_exhausted');
+    assert.equal(payload.failure.failedAt, '2026-03-07T10:00:00.000Z');
+  });
+
+  await runTest('routeFailedIngressJobToDlq routes exhausted transient failures', async () => {
+    const capturedPayloads: { eventKey: string }[] = [];
+    const result = await routeFailedIngressJobToDlq({
+      job: {
+        id: 'job-2',
+        name: INGRESS_JOB_NAME,
+        queueName: 'wa-webhook-ingress',
+        data: createIngressJobPayload({
+          eventKey: 'message:wamid-dlq-002',
+          payload: {
+            object: 'whatsapp_business_account',
+          },
+        }),
+        attemptsMade: 5,
+        opts: {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 1000,
+            jitter: 0.2,
+          },
+        },
+      },
+      error: new Error('transient outage'),
+      policies: createTestPolicies({
+        permanentMaxAttempts: 2,
+        transientMaxAttempts: 5,
+      }),
+      dlqQueue: {
+        enqueue: async (payload) => {
+          capturedPayloads.push({ eventKey: payload.eventKey });
+          return 'dlq-job-2';
+        },
+        close: async () => undefined,
+      },
+      now: () => '2026-03-07T10:05:00.000Z',
+    });
+
+    assert.equal(result.willRetry, false);
+    assert.equal(result.routedToDlq, true);
+    assert.equal(result.dlqJobId, 'dlq-job-2');
+    assert.equal(result.dlqRouteError, null);
+    assert.deepEqual(capturedPayloads, [{ eventKey: 'message:wamid-dlq-002' }]);
+  });
+
+  await runTest('routeFailedIngressJobToDlq does not route retryable failures', async () => {
+    let enqueueCalled = false;
+    const result = await routeFailedIngressJobToDlq({
+      job: {
+        id: 'job-3',
+        name: INGRESS_JOB_NAME,
+        queueName: 'wa-webhook-ingress',
+        data: createIngressJobPayload({
+          eventKey: 'message:wamid-dlq-003',
+          payload: {
+            object: 'whatsapp_business_account',
+          },
+        }),
+        attemptsMade: 1,
+        opts: {
+          attempts: 5,
+        },
+      },
+      error: new Error('temporary timeout'),
+      policies: createTestPolicies({
+        permanentMaxAttempts: 2,
+        transientMaxAttempts: 5,
+      }),
+      dlqQueue: {
+        enqueue: async () => {
+          enqueueCalled = true;
+          return 'dlq-job-3';
+        },
+        close: async () => undefined,
+      },
+    });
+
+    assert.equal(result.willRetry, true);
+    assert.equal(result.routedToDlq, false);
+    assert.equal(enqueueCalled, false);
+  });
+
+  await runTest('routeFailedIngressJobToDlq surfaces routing failures', async () => {
+    const result = await routeFailedIngressJobToDlq({
+      job: {
+        id: 'job-4',
+        name: INGRESS_JOB_NAME,
+        queueName: 'wa-webhook-ingress',
+        data: createIngressJobPayload({
+          eventKey: 'message:wamid-dlq-004',
+          payload: {
+            object: 'whatsapp_business_account',
+          },
+        }),
+        attemptsMade: 5,
+        opts: {
+          attempts: 5,
+        },
+      },
+      error: new Error('final transient error'),
+      policies: createTestPolicies({
+        permanentMaxAttempts: 2,
+        transientMaxAttempts: 5,
+      }),
+      dlqQueue: {
+        enqueue: async () => {
+          throw new Error('redis unavailable');
+        },
+        close: async () => undefined,
+      },
+    });
+
+    assert.equal(result.willRetry, false);
+    assert.equal(result.routedToDlq, false);
+    assert.equal(result.dlqJobId, null);
+    assert.equal(result.dlqRouteError, 'redis unavailable');
   });
 } finally {
   console.log('\n' + '-'.repeat(40));
