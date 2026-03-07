@@ -75,6 +75,8 @@ describe('compositionChain - Structured Output & Fallbacks', () => {
       normalizedInput: 'trigger failure',
       route: 'rag_path',
       intent: 'RAG',
+      retrievedContext: 'Mock context',
+      citations: [],
     };
 
     const result = await compositionChain.invoke(initialState);

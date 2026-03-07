@@ -10,6 +10,7 @@ import { getEmbeddings } from '../../rag/embeddings.js';
 export const retrievalChain = RunnableLambda.from(async (state: AgentState) => {
   let retrievedContext = '';
   let highestConfidence = 0;
+  let citations: Record<string, unknown>[] = [];
 
   if (state.normalizedInput) {
     const vectorStore = getVectorStore(getEmbeddings());
@@ -24,6 +25,7 @@ export const retrievalChain = RunnableLambda.from(async (state: AgentState) => {
     if (results.length > 0 && firstResult) {
       highestConfidence = firstResult[1];
       retrievedContext = results.map((result) => result[0]?.pageContent || '').join('\n\n');
+      citations = results.map((result) => result[0]?.metadata || {});
     }
   }
 
@@ -31,6 +33,7 @@ export const retrievalChain = RunnableLambda.from(async (state: AgentState) => {
     ...state,
     retrievedContext,
     retrievalConfidence: highestConfidence,
+    citations,
     context: {
       userId: state.context?.userId || 'unknown-user',
       conversationId: state.context?.conversationId || 'unknown-convo',

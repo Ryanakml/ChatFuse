@@ -14,9 +14,25 @@ export const policyChain = RunnableLambda.from(async (state: AgentState) => {
     finalResponse = 'I cannot fulfill this request due to policy restrictions.';
   }
 
-  return {
+  // Enforce grounded response on low RAG retrieval confidence
+  if (
+    state.intent === 'RAG' &&
+    state.retrievalConfidence !== undefined &&
+    state.retrievalConfidence < 0.7
+  ) {
+    finalResponse = 'I need clarification';
+  }
+
+  const updatedState = {
     ...state,
     isSafe,
     finalResponse,
   };
+
+  // Escalate naturally if clarifying
+  if (finalResponse === 'I need clarification' && state.intent !== 'ESCALATION') {
+    updatedState.intent = 'CLARIFICATION';
+  }
+
+  return updatedState as AgentState;
 });

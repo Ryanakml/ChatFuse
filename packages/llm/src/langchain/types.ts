@@ -12,6 +12,7 @@ export interface AgentState {
   context?: MessageContext;
   retrievedContext?: string;
   retrievalConfidence?: number;
+  citations?: Record<string, unknown>[];
   intent?: 'RAG' | 'TOOL' | 'CLARIFICATION' | 'ESCALATION' | 'UNKNOWN';
   confidence?: number;
   route?: 'rag_path' | 'tool_path' | 'clarification_path' | 'escalation_path';
