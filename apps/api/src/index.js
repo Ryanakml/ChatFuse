@@ -1,3 +1,6 @@
+import { setupTelemetry, logger } from '@wa-chat/shared';
+// Initialize telemetry before other imports if possible, or right at the top
+setupTelemetry('wa-chat-api');
 import express from 'express';
 import dotenv from 'dotenv';
 import { authenticateRequest, requireRole } from './auth.js';
@@ -19,9 +22,7 @@ const computeRate = (count, total) => {
     return Number((count / total).toFixed(4));
 };
 const logObservabilityEvent = (level, event, context, attributes) => {
-    const message = JSON.stringify({
-        ts: new Date().toISOString(),
-        level,
+    const payload = {
         event,
         traceId: context.traceId,
         correlationId: context.correlationId,
@@ -29,16 +30,8 @@ const logObservabilityEvent = (level, event, context, attributes) => {
         path: context.path,
         sourceIp: context.sourceIp,
         ...attributes,
-    });
-    if (level === 'error') {
-        console.error(message);
-        return;
-    }
-    if (level === 'warn') {
-        console.warn(message);
-        return;
-    }
-    console.log(message);
+    };
+    logger[level](payload, event);
 };
 const createDefaultIngressObservability = () => {
     const metrics = {
@@ -460,6 +453,10 @@ export const createApp = (runtimeEnv, options = {}) => {
             await ingressQueue.enqueue(createIngressJobPayload({
                 eventKey,
                 payload: coerceJsonValue(payload),
+                traceContext: {
+                    traceId: ingressContext.traceId,
+                    correlationId: ingressContext.correlationId,
+                },
             }));
             observability.onEnqueueSuccess(ingressContext, {
                 eventKey,
@@ -518,7 +515,7 @@ export const startServer = (runtimeEnv) => {
     }
     const app = createApp(runtimeEnv);
     return app.listen(port, () => {
-        console.log(`API listening on ${port}`);
+        logger.info(`API listening on ${port}`);
     });
 };
 dotenv.config();
