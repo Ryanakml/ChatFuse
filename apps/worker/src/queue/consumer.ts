@@ -4,6 +4,7 @@ import {
   INGRESS_QUEUE_NAME,
   assertIngressJobPayload,
   type IngressJobPayload,
+  appMetrics,
 } from '@wa-chat/shared';
 
 export class WorkerJobTimeoutError extends Error {
@@ -111,6 +112,7 @@ export const runIngressJob = async (input: {
   const { jobName, jobData, policies, processor } = input;
   const attemptsMade = input.attemptsMade ?? 0;
   const currentAttempt = attemptsMade + 1;
+  const startTime = Date.now();
 
   try {
     if (jobName !== INGRESS_JOB_NAME) {
@@ -125,16 +127,27 @@ export const runIngressJob = async (input: {
     }
 
     await withTimeout(processor(payload), policies.jobTimeoutMs);
+    appMetrics.queueProcessingLatency.record(Date.now() - startTime, { status: 'success' });
   } catch (error: unknown) {
+    appMetrics.queueProcessingLatency.record(Date.now() - startTime, { status: 'error' });
     const classifiedError = classifyWorkerError(error);
     const permanentAttempts = policies.retry.permanentMaxAttempts;
 
     if (classifiedError.errorClass === 'permanent' && currentAttempt >= permanentAttempts) {
+      appMetrics.queueDlqCount.add(1, { error_class: 'permanent' });
       if (classifiedError.error instanceof UnrecoverableError) {
         throw classifiedError.error;
       }
 
       throw new UnrecoverableError(classifiedError.error.message);
+    }
+
+    if (classifiedError.errorClass === 'transient') {
+      if (currentAttempt >= policies.retry.transientMaxAttempts) {
+        appMetrics.queueDlqCount.add(1, { error_class: 'transient' });
+      } else {
+        appMetrics.queueRetryCount.add(1);
+      }
     }
 
     throw classifiedError.error;

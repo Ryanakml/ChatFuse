@@ -14,6 +14,7 @@ import {
   createIngressJobPayload,
   type IngressJobPayload,
   type JsonValue,
+  appMetrics,
 } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -396,6 +397,24 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
     verify: (req, _res, buffer) => {
       (req as WebhookRequest).rawBody = Buffer.from(buffer);
     },
+  });
+
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    res.on('finish', () => {
+      const durationMs = Date.now() - startTime;
+      const attributes = {
+        method: req.method,
+        route: req.route?.path || req.path,
+        status: String(res.statusCode),
+      };
+      appMetrics.apiRequestCount.add(1, attributes);
+      appMetrics.apiLatency.record(durationMs, attributes);
+      if (res.statusCode >= 500) {
+        appMetrics.apiErrorCount.add(1, attributes);
+      }
+    });
+    next();
   });
 
   app.set('trust proxy', trustProxy ? 1 : false);

@@ -10,6 +10,7 @@ import {
 
 export * from './schemas.js';
 export * from './reliability.js';
+import { appMetrics } from '@wa-chat/shared';
 
 /**
  * Helper to provide a human-safe fallback message when a tool fails (e.g., timeout, circuit breaker open).
@@ -19,8 +20,17 @@ async function withSafeFallback(
   toolName: string,
 ): Promise<string> {
   try {
-    return await promiseFn();
+    const result = await promiseFn();
+    appMetrics.toolExecutionCount.add(1, { tool: toolName, status: 'success' });
+    return result;
   } catch (error) {
+    const isTimeout =
+      error instanceof Error &&
+      (error.message.includes('timeout') || error.name === 'TimeoutError');
+    appMetrics.toolExecutionCount.add(1, {
+      tool: toolName,
+      status: isTimeout ? 'timeout' : 'error',
+    });
     console.error(
       `[Tool Error] ${toolName} failed:`,
       error instanceof Error ? error.message : error,

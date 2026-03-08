@@ -1,20 +1,25 @@
 import { RunnableBranch, RunnableLambda, Runnable } from '@langchain/core/runnables';
 import type { AgentState } from '../types.js';
+import { appMetrics } from '@wa-chat/shared';
 
 // Define the individual path handlers
 const ragPath = RunnableLambda.from(async (state: AgentState) => {
+  appMetrics.agentPathCount.add(1, { path: 'rag' });
   return { ...state, route: 'rag_path' as const };
 });
 
 const toolPath = RunnableLambda.from(async (state: AgentState) => {
+  appMetrics.agentPathCount.add(1, { path: 'tool' });
   return { ...state, route: 'tool_path' as const };
 });
 
 const clarificationPath = RunnableLambda.from(async (state: AgentState) => {
+  appMetrics.agentPathCount.add(1, { path: 'clarification' });
   return { ...state, route: 'clarification_path' as const };
 });
 
 const escalationPath = RunnableLambda.from(async (state: AgentState) => {
+  appMetrics.agentPathCount.add(1, { path: 'escalation' });
   return { ...state, route: 'escalation_path' as const };
 });
 

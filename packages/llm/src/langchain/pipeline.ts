@@ -2,6 +2,7 @@ import { RunnableSequence, Runnable } from '@langchain/core/runnables';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { BaseOutputParser } from '@langchain/core/output_parsers';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { appMetrics } from '@wa-chat/shared';
 import type { AgentState } from './types.js';
 import { normalizationChain } from './chains/normalization.js';
 import { retrievalChain } from './chains/retrieval.js';
@@ -28,7 +29,14 @@ export function createStandardChain<Input = unknown, Output = unknown>(
   let sequence: Runnable = prompt.pipe(model);
 
   if (parser) {
-    sequence = sequence.pipe(parser);
+    sequence = sequence.pipe(async (input, config) => {
+      try {
+        return await parser.invoke(input, config);
+      } catch (error) {
+        appMetrics.agentParseFailureCount.add(1);
+        throw error;
+      }
+    });
   }
 
   return sequence as RunnableSequence<Input, Output>;

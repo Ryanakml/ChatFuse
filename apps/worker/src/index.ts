@@ -14,6 +14,7 @@ import {
   INGRESS_DLQ_QUEUE_NAME,
   INGRESS_JOB_NAME,
   INGRESS_QUEUE_NAME,
+  appMetrics,
   coerceJsonValue,
   createIngressDlqJobPayload,
   type IngressDlqErrorClass,
@@ -366,11 +367,24 @@ export const startWorker = (
   const mainQueue = new Queue(INGRESS_QUEUE_NAME, {
     connection: { url: env.REDIS_URL },
   });
+  let previousQueueDepth = 0;
 
   const queueDepthMetricsInterval = setInterval(() => {
     mainQueue
       .getJobCounts()
       .then((counts) => {
+        const queueDepth =
+          (counts.active ?? 0) +
+          (counts.waiting ?? 0) +
+          (counts.prioritized ?? 0) +
+          (counts.delayed ?? 0) +
+          (counts.waitingChildren ?? 0);
+        const queueDepthDelta = queueDepth - previousQueueDepth;
+        appMetrics.queueDepth.add(queueDepthDelta, {
+          queue: INGRESS_QUEUE_NAME,
+        });
+        previousQueueDepth = queueDepth;
+
         logger.info(
           {
             event: 'worker.queue.depth',

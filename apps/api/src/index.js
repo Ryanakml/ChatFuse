@@ -7,7 +7,7 @@ import { authenticateRequest, requireRole } from './auth.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { kpisRouter } from './routes/kpis.js';
 import { resolveWorkerRetryPolicy, validateEnv } from '@wa-chat/config';
-import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, } from '@wa-chat/shared';
+import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, appMetrics, } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Queue } from 'bullmq';
@@ -276,6 +276,23 @@ export const createApp = (runtimeEnv, options = {}) => {
         verify: (req, _res, buffer) => {
             req.rawBody = Buffer.from(buffer);
         },
+    });
+    app.use((req, res, next) => {
+        const startTime = Date.now();
+        res.on('finish', () => {
+            const durationMs = Date.now() - startTime;
+            const attributes = {
+                method: req.method,
+                route: req.route?.path || req.path,
+                status: String(res.statusCode),
+            };
+            appMetrics.apiRequestCount.add(1, attributes);
+            appMetrics.apiLatency.record(durationMs, attributes);
+            if (res.statusCode >= 500) {
+                appMetrics.apiErrorCount.add(1, attributes);
+            }
+        });
+        next();
     });
     app.set('trust proxy', trustProxy ? 1 : false);
     const normalizeIp = (ip) => ip.replace(/^::ffff:/, '');
