@@ -16,7 +16,7 @@ jobs:
           sudo mv prometheus-2.51.1.linux-amd64/promtool /usr/local/bin/
 
       - name: Check Prometheus Config
-        run: promtool check config infra/docker/prometheus.yml
+        run: promtool check config docker/prometheus.yml
 
       - name: Check Prometheus Rules
-        run: promtool check rules infra/docker/prometheus/alert.rules.yml
+        run: promtool check rules docker/prometheus/alert.rules.yml
