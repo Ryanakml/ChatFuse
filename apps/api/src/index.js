@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import { authenticateRequest, requireRole } from './auth.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { kpisRouter } from './routes/kpis.js';
+import { logAuditEvent, getAuditEvents } from './repositories/audit.js';
+import { deleteUserData } from './repositories/data-deletion.js';
 import { resolveWorkerRetryPolicy, validateEnv } from '@wa-chat/config';
 import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, appMetrics, } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
@@ -499,6 +501,62 @@ export const createApp = (runtimeEnv, options = {}) => {
     });
     app.use('/api/conversations', conversationsRouter);
     app.use('/api/kpis', kpisRouter);
+    // --- L1: Admin security routes ---
+    /**
+     * DELETE /api/admin/users/:userId
+     * Hard-delete all data for a user (GDPR right-to-erasure).
+     * Requires: valid JWT + admin role + IP allowlist + rate limit.
+     */
+    app.delete('/api/admin/users/:userId', enforceAdminAccess, authenticateRequest, requireRole('admin'), async (req, res) => {
+        const { userId } = req.params;
+        const actorId = req.user?.id ?? 'unknown';
+        try {
+            const result = await deleteUserData(userId, actorId, 'admin');
+            res.json(result);
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            if (message.includes('not found')) {
+                res.status(404).json({ error: 'User not found' });
+            }
+            else {
+                logger.error({ event: 'admin.delete_user.error', userId, actorId, message }, 'Delete user data failed');
+                res.status(500).json({ error: 'Failed to delete user data' });
+            }
+        }
+    });
+    /**
+     * GET /api/admin/audit
+     * Query the immutable audit trail.
+     * Requires: valid JWT + admin role + IP allowlist + rate limit.
+     */
+    app.get('/api/admin/audit', enforceAdminAccess, authenticateRequest, requireRole('admin'), async (req, res) => {
+        const query = req.query;
+        const actorId = req.user?.id ?? 'unknown';
+        try {
+            const events = await getAuditEvents({
+                ...(query['action'] !== undefined && { action: query['action'] }),
+                ...(query['actor_id'] !== undefined && { actor_id: query['actor_id'] }),
+                ...(query['resource_type'] !== undefined && { resource_type: query['resource_type'] }),
+                limit: query['limit'] ? Number(query['limit']) : 50,
+                offset: query['offset'] ? Number(query['offset']) : 0,
+            });
+            // Log the audit query itself
+            await logAuditEvent({
+                actor_id: actorId,
+                actor_role: req.user?.role ?? 'admin',
+                action: 'audit.query',
+                resource_type: 'audit_events',
+                metadata: { filters: query },
+            }).catch(() => undefined); // non-blocking; audit-of-audit failure must not break response
+            res.json({ events });
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            logger.error({ event: 'admin.audit.query.error', actorId, message }, 'Audit query failed');
+            res.status(500).json({ error: 'Failed to query audit events' });
+        }
+    });
     app.use((error, req, res, next) => {
         if (req.path !== '/webhook') {
             next(error);

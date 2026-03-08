@@ -319,3 +319,5 @@ export * from './conversations.js';
 export * from './metrics.js';
 export * from './logger.js';
 export * from './telemetry.js';
+export * from './pii.js';
+export * from './secret-rotation.js';
