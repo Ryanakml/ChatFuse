@@ -1,5 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import { authenticateRequest, requireRole } from './auth.js';
+import { conversationsRouter } from './routes/conversations.js';
+import { kpisRouter } from './routes/kpis.js';
 import { resolveWorkerRetryPolicy, validateEnv } from '@wa-chat/config';
 import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
@@ -476,6 +479,12 @@ export const createApp = (runtimeEnv, options = {}) => {
     app.get('/admin/health', enforceAdminAccess, (_req, res) => {
         res.json({ ok: true });
     });
+    // Example RBAC-protected endpoint implementation
+    app.post('/api/protected/admin-only', authenticateRequest, requireRole('admin'), (req, res) => {
+        res.json({ ok: true });
+    });
+    app.use('/api/conversations', conversationsRouter);
+    app.use('/api/kpis', kpisRouter);
     app.use((error, req, res, next) => {
         if (req.path !== '/webhook') {
             next(error);

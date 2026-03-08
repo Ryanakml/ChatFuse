@@ -6,9 +6,11 @@ export const INGRESS_DLQ_JOB_NAME = 'ingress-webhook-event-dlq';
 export const INGRESS_DLQ_JOB_SCHEMA_VERSION = 1;
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
-const isNullableInteger = (value, options) => value === null || (typeof value === 'number' && Number.isInteger(value) && value >= options.minimum);
+const isNullableInteger = (value, options) => value === null ||
+    (typeof value === 'number' && Number.isInteger(value) && value >= options.minimum);
 const isNullableFiniteNumber = (value) => value === null || (typeof value === 'number' && Number.isFinite(value));
-const isNullableJitter = (value) => value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
+const isNullableJitter = (value) => value === null ||
+    (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
 export const isJsonValue = (value) => {
     if (value === null ||
         typeof value === 'string' ||
@@ -170,5 +172,8 @@ export const createIngressDlqJobPayload = (input) => {
     };
     return assertIngressDlqJobPayload(payload);
 };
+export const APP_ROLES = ['admin', 'support_agent', 'analyst'];
 export * from './rag.js';
+export * from './conversations.js';
+export * from './metrics.js';
 //# sourceMappingURL=index.js.map

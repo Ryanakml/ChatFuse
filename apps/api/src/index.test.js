@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { INGRESS_JOB_SCHEMA_VERSION } from '@wa-chat/shared';
+import './repositories/index.test.js';
 import { createApp, createIngressQueueRetryJobOptions } from './index.js';
 const color = {
     reset: '\x1b[0m',
@@ -503,6 +504,12 @@ try {
             const p95 = ordered[percentileIndex];
             assert.ok(typeof p95 === 'number');
             assert.ok(p95 <= 1_500, `Expected ACK p95 <= 1500ms, received ${p95}ms`);
+        });
+    });
+    await runTest('GET /api/kpis requires authentication', async () => {
+        await withServer({}, async (baseUrl) => {
+            const res = await fetch(`${baseUrl}/api/kpis`);
+            assert.equal(res.status, 401);
         });
     });
 }

@@ -1,2 +1,2 @@
-export {};
+import './repositories/index.test.js';
 //# sourceMappingURL=index.test.d.ts.map
