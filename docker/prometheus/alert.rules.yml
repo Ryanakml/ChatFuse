@@ -10,7 +10,7 @@ groups:
         annotations:
           summary: 'High rate of webhook verification failures'
           description: 'More than 10 webhook verification failures in the last 5 minutes. Check WhatsApp app secret and configuration.'
-          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#webhook-verification-failure'
+          runbook_url: 'docs/runbooks/webhook-outage.md'
 
       # 2. ACK latency breach
       # Alerts if the p95 latency for webhook POST requests is greater than 1500ms over 5 minutes
@@ -22,7 +22,7 @@ groups:
         annotations:
           summary: 'Webhook ACK latency breach (p95 > 1.5s)'
           description: 'The 95th percentile latency for webhook ingress is exceeding the 1.5 second SLA.'
-          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#ack-latency-breach'
+          runbook_url: 'docs/runbooks/webhook-outage.md'
 
       # 3. DLQ spike
       # Alerts if the dead letter queue receives more than 5 messages in 5 minutes
@@ -33,7 +33,7 @@ groups:
         annotations:
           summary: 'High number of DLQ messages'
           description: 'Multiple messages have permanently failed and entered the DLQ.'
-          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#dlq-spike'
+          runbook_url: 'docs/runbooks/dlq-replay.md'
 
       # 4. Provider outage/fallback surge
       # Alerts if fallback routing from primary to secondary LLM is frequently triggered
@@ -44,7 +44,7 @@ groups:
         annotations:
           summary: 'High rate of LLM provider fallbacks'
           description: 'The primary LLM provider may be experiencing an outage or high latency.'
-          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#provider-outage'
+          runbook_url: 'docs/runbooks/llm-provider-outage.md'
 
       # 5. Escalation ratio spike
       # Alerts if the ratio of escalated sessions to total sessions is > 20% over 15 minutes
@@ -56,4 +56,4 @@ groups:
         annotations:
           summary: 'High human escalation ratio'
           description: 'More than 20% of interactions are escalating to a human agent. The model may be confused or facing systemic tool failures.'
-          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#escalation-ratio-spike'
+          runbook_url: 'docs/runbooks/llm-provider-outage.md'
