@@ -1,10 +1,13 @@
+import { setupTelemetry, logger } from '@wa-chat/shared';
+// Initialize telemetry before other imports if possible, or right at the top
+setupTelemetry('wa-chat-api');
 import express from 'express';
 import dotenv from 'dotenv';
 import { authenticateRequest, requireRole } from './auth.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { kpisRouter } from './routes/kpis.js';
 import { resolveWorkerRetryPolicy, validateEnv } from '@wa-chat/config';
-import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, } from '@wa-chat/shared';
+import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, appMetrics, } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Queue } from 'bullmq';
@@ -19,9 +22,7 @@ const computeRate = (count, total) => {
     return Number((count / total).toFixed(4));
 };
 const logObservabilityEvent = (level, event, context, attributes) => {
-    const message = JSON.stringify({
-        ts: new Date().toISOString(),
-        level,
+    const payload = {
         event,
         traceId: context.traceId,
         correlationId: context.correlationId,
@@ -29,16 +30,8 @@ const logObservabilityEvent = (level, event, context, attributes) => {
         path: context.path,
         sourceIp: context.sourceIp,
         ...attributes,
-    });
-    if (level === 'error') {
-        console.error(message);
-        return;
-    }
-    if (level === 'warn') {
-        console.warn(message);
-        return;
-    }
-    console.log(message);
+    };
+    logger[level](payload, event);
 };
 const createDefaultIngressObservability = () => {
     const metrics = {
@@ -284,6 +277,23 @@ export const createApp = (runtimeEnv, options = {}) => {
             req.rawBody = Buffer.from(buffer);
         },
     });
+    app.use((req, res, next) => {
+        const startTime = Date.now();
+        res.on('finish', () => {
+            const durationMs = Date.now() - startTime;
+            const attributes = {
+                method: req.method,
+                route: req.route?.path || req.path,
+                status: String(res.statusCode),
+            };
+            appMetrics.apiRequestCount.add(1, attributes);
+            appMetrics.apiLatency.record(durationMs, attributes);
+            if (res.statusCode >= 500) {
+                appMetrics.apiErrorCount.add(1, attributes);
+            }
+        });
+        next();
+    });
     app.set('trust proxy', trustProxy ? 1 : false);
     const normalizeIp = (ip) => ip.replace(/^::ffff:/, '');
     const buildIngressTraceContext = (req, sourceIp) => {
@@ -460,6 +470,10 @@ export const createApp = (runtimeEnv, options = {}) => {
             await ingressQueue.enqueue(createIngressJobPayload({
                 eventKey,
                 payload: coerceJsonValue(payload),
+                traceContext: {
+                    traceId: ingressContext.traceId,
+                    correlationId: ingressContext.correlationId,
+                },
             }));
             observability.onEnqueueSuccess(ingressContext, {
                 eventKey,
@@ -518,7 +532,7 @@ export const startServer = (runtimeEnv) => {
     }
     const app = createApp(runtimeEnv);
     return app.listen(port, () => {
-        console.log(`API listening on ${port}`);
+        logger.info(`API listening on ${port}`);
     });
 };
 dotenv.config();

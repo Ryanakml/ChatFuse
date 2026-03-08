@@ -254,6 +254,10 @@ try {
             assert.equal(deps.enqueuedJobs.length, 1);
             assert.equal(typeof deps.enqueuedJobs[0]?.eventKey, 'string');
             assert.equal(deps.enqueuedJobs[0]?.schemaVersion, INGRESS_JOB_SCHEMA_VERSION);
+            const enqueuedTraceContext = deps.enqueuedJobs[0]?.traceContext;
+            assert.ok(enqueuedTraceContext, 'Enqueued job must contain traceContext');
+            assert.equal(enqueuedTraceContext.correlationId, correlationId);
+            assert.match(enqueuedTraceContext.traceId, /^[a-f0-9]{32}$/);
             const ingressEvents = getObservabilityEvents(deps.observabilityEvents, 'ingress_start');
             assert.equal(ingressEvents.length, 1);
             assert.equal(ingressEvents[0]?.context.correlationId, correlationId);

@@ -80,6 +80,7 @@ export const createIngressJobPayload = (input) => {
         eventKey,
         payload: input.payload,
         receivedAt,
+        ...(input.traceContext && { traceContext: input.traceContext }),
     };
 };
 export const isIngressDlqJobPayload = (value) => {
@@ -176,4 +177,6 @@ export const APP_ROLES = ['admin', 'support_agent', 'analyst'];
 export * from './rag.js';
 export * from './conversations.js';
 export * from './metrics.js';
+export * from './logger.js';
+export * from './telemetry.js';
 //# sourceMappingURL=index.js.map

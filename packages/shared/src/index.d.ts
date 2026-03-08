@@ -18,6 +18,10 @@ export type IngressJobPayloadV1 = {
     eventKey: string;
     payload: JsonValue;
     receivedAt: string;
+    traceContext?: {
+        traceId: string;
+        correlationId: string;
+    };
 };
 export type IngressJobPayload = IngressJobPayloadV1;
 export type IngressDlqFailureReason = 'transient_retries_exhausted' | 'permanent_retries_exhausted';
@@ -63,6 +67,10 @@ export declare const createIngressJobPayload: (input: {
     eventKey: string;
     payload: JsonValue;
     receivedAt?: string;
+    traceContext?: {
+        traceId: string;
+        correlationId: string;
+    };
 }) => IngressJobPayload;
 export declare const isIngressDlqJobPayload: (value: unknown) => value is IngressDlqJobPayload;
 export declare const assertIngressDlqJobPayload: (value: unknown) => IngressDlqJobPayload;
@@ -72,4 +80,6 @@ export type AppRole = (typeof APP_ROLES)[number];
 export * from './rag.js';
 export * from './conversations.js';
 export * from './metrics.js';
+export * from './logger.js';
+export * from './telemetry.js';
 //# sourceMappingURL=index.d.ts.map

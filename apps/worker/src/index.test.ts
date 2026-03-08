@@ -104,27 +104,40 @@ try {
     );
   });
 
-  await runTest('runIngressJob accepts a valid versioned payload', async () => {
-    const payload = createIngressJobPayload({
-      eventKey: 'message:wamid-001',
-      payload: {
-        object: 'whatsapp_business_account',
-      },
-      receivedAt: '2026-03-07T00:00:00.000Z',
-    });
+  await runTest(
+    'runIngressJob accepts a valid versioned payload and propagates traceContext',
+    async () => {
+      const payload = createIngressJobPayload({
+        eventKey: 'message:wamid-001',
+        payload: {
+          object: 'whatsapp_business_account',
+        },
+        receivedAt: '2026-03-07T00:00:00.000Z',
+        traceContext: {
+          traceId: '12345678901234567890123456789012',
+          correlationId: '123456789012',
+        },
+      });
 
-    let seenEventKey: string | null = null;
-    await runIngressJob({
-      jobName: INGRESS_JOB_NAME,
-      jobData: payload,
-      policies: createTestPolicies(),
-      processor: async (jobPayload) => {
-        seenEventKey = jobPayload.eventKey;
-      },
-    });
+      let seenEventKey: string | null = null;
+      let seenTraceContext: { traceId: string; correlationId: string } | undefined;
 
-    assert.equal(seenEventKey, 'message:wamid-001');
-  });
+      await runIngressJob({
+        jobName: INGRESS_JOB_NAME,
+        jobData: payload,
+        policies: createTestPolicies(),
+        processor: async (jobPayload) => {
+          seenEventKey = jobPayload.eventKey;
+          seenTraceContext = jobPayload.traceContext;
+        },
+      });
+
+      assert.equal(seenEventKey, 'message:wamid-001');
+      assert.ok(seenTraceContext, 'Processor must receive traceContext from payload');
+      assert.equal(seenTraceContext.traceId, '12345678901234567890123456789012');
+      assert.equal(seenTraceContext.correlationId, '123456789012');
+    },
+  );
 
   await runTest('runIngressJob rejects unexpected job names', async () => {
     const payload = createIngressJobPayload({
@@ -214,52 +227,55 @@ try {
     );
   });
 
-  await runTest('runIngressJob allows permanent errors to retry until permanent max attempts', async () => {
-    const payload = createIngressJobPayload({
-      eventKey: 'message:wamid-006',
-      payload: {
-        object: 'whatsapp_business_account',
-      },
-    });
+  await runTest(
+    'runIngressJob allows permanent errors to retry until permanent max attempts',
+    async () => {
+      const payload = createIngressJobPayload({
+        eventKey: 'message:wamid-006',
+        payload: {
+          object: 'whatsapp_business_account',
+        },
+      });
 
-    await assert.rejects(
-      () =>
-        runIngressJob({
-          jobName: INGRESS_JOB_NAME,
-          jobData: payload,
-          attemptsMade: 0,
-          policies: createTestPolicies({
-            permanentMaxAttempts: 2,
-            transientMaxAttempts: 5,
+      await assert.rejects(
+        () =>
+          runIngressJob({
+            jobName: INGRESS_JOB_NAME,
+            jobData: payload,
+            attemptsMade: 0,
+            policies: createTestPolicies({
+              permanentMaxAttempts: 2,
+              transientMaxAttempts: 5,
+            }),
+            processor: async () => {
+              throw new WorkerPermanentError('permanent but one more attempt allowed');
+            },
           }),
-          processor: async () => {
-            throw new WorkerPermanentError('permanent but one more attempt allowed');
-          },
-        }),
-      (error: unknown) =>
-        error instanceof WorkerPermanentError &&
-        error.message === 'permanent but one more attempt allowed',
-    );
+        (error: unknown) =>
+          error instanceof WorkerPermanentError &&
+          error.message === 'permanent but one more attempt allowed',
+      );
 
-    await assert.rejects(
-      () =>
-        runIngressJob({
-          jobName: INGRESS_JOB_NAME,
-          jobData: payload,
-          attemptsMade: 1,
-          policies: createTestPolicies({
-            permanentMaxAttempts: 2,
-            transientMaxAttempts: 5,
+      await assert.rejects(
+        () =>
+          runIngressJob({
+            jobName: INGRESS_JOB_NAME,
+            jobData: payload,
+            attemptsMade: 1,
+            policies: createTestPolicies({
+              permanentMaxAttempts: 2,
+              transientMaxAttempts: 5,
+            }),
+            processor: async () => {
+              throw new WorkerPermanentError('permanent but one more attempt allowed');
+            },
           }),
-          processor: async () => {
-            throw new WorkerPermanentError('permanent but one more attempt allowed');
-          },
-        }),
-      (error: unknown) =>
-        error instanceof UnrecoverableError &&
-        error.message === 'permanent but one more attempt allowed',
-    );
-  });
+        (error: unknown) =>
+          error instanceof UnrecoverableError &&
+          error.message === 'permanent but one more attempt allowed',
+      );
+    },
+  );
 
   await runTest('runIngressJob keeps transient errors retryable', async () => {
     await assert.rejects(

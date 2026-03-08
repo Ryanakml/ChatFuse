@@ -1,3 +1,6 @@
+import { setupTelemetry, logger } from '@wa-chat/shared';
+setupTelemetry('wa-chat-worker');
+
 import dotenv from 'dotenv';
 import { Queue } from 'bullmq';
 import {
@@ -11,6 +14,7 @@ import {
   INGRESS_DLQ_QUEUE_NAME,
   INGRESS_JOB_NAME,
   INGRESS_QUEUE_NAME,
+  appMetrics,
   coerceJsonValue,
   createIngressDlqJobPayload,
   type IngressDlqErrorClass,
@@ -334,14 +338,15 @@ type StartWorkerOptions = {
 };
 
 const defaultProcessor: IngressJobProcessor = async (job: IngressJobPayload) => {
-  console.log(
-    JSON.stringify({
-      ts: new Date().toISOString(),
-      level: 'info',
+  logger.info(
+    {
       event: 'worker.job.processed',
       eventKey: job.eventKey,
       schemaVersion: job.schemaVersion,
-    }),
+      traceId: job.traceContext?.traceId,
+      correlationId: job.traceContext?.correlationId,
+    },
+    'worker.job.processed',
   );
 };
 
@@ -362,40 +367,49 @@ export const startWorker = (
   const mainQueue = new Queue(INGRESS_QUEUE_NAME, {
     connection: { url: env.REDIS_URL },
   });
+  let previousQueueDepth = 0;
 
   const queueDepthMetricsInterval = setInterval(() => {
     mainQueue
       .getJobCounts()
       .then((counts) => {
-        console.log(
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            level: 'info',
+        const queueDepth =
+          (counts.active ?? 0) +
+          (counts.waiting ?? 0) +
+          (counts.prioritized ?? 0) +
+          (counts.delayed ?? 0) +
+          (counts.waitingChildren ?? 0);
+        const queueDepthDelta = queueDepth - previousQueueDepth;
+        appMetrics.queueDepth.add(queueDepthDelta, {
+          queue: INGRESS_QUEUE_NAME,
+        });
+        previousQueueDepth = queueDepth;
+
+        logger.info(
+          {
             event: 'worker.queue.depth',
             worker: workerName,
             queueName: INGRESS_QUEUE_NAME,
             counts,
-          }),
+          },
+          'worker.queue.depth',
         );
       })
       .catch((error: unknown) => {
-        console.error(
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            level: 'error',
+        logger.error(
+          {
             event: 'worker.queue.depth.error',
             worker: workerName,
             message: error instanceof Error ? error.message : String(error),
-          }),
+          },
+          'worker.queue.depth.error',
         );
       });
   }, 60000);
 
   worker.on('ready', () => {
-    console.log(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        level: 'info',
+    logger.info(
+      {
         event: 'worker.ready',
         worker: workerName,
         queueName: INGRESS_QUEUE_NAME,
@@ -404,19 +418,19 @@ export const startWorker = (
         jobTimeoutMs: policies.jobTimeoutMs,
         transientMaxAttempts: policies.retry.transientMaxAttempts,
         permanentMaxAttempts: policies.retry.permanentMaxAttempts,
-      }),
+      },
+      'worker.ready',
     );
   });
 
   worker.on('error', (error: Error) => {
-    console.error(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        level: 'error',
+    logger.error(
+      {
         event: 'worker.error',
         worker: workerName,
         message: error.message,
-      }),
+      },
+      'worker.error',
     );
   });
 
@@ -425,10 +439,8 @@ export const startWorker = (
     const finishedOn = job.finishedOn || Date.now();
     const processingLatencyMs = processedOn ? finishedOn - processedOn : null;
 
-    console.log(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        level: 'info',
+    logger.info(
+      {
         event: 'worker.job.completed',
         worker: workerName,
         queueName: INGRESS_QUEUE_NAME,
@@ -436,7 +448,8 @@ export const startWorker = (
         jobName: job?.name ?? null,
         attemptsMade: job?.attemptsMade ?? 0,
         processingLatencyMs,
-      }),
+      },
+      'worker.job.completed',
     );
   });
 
@@ -453,7 +466,6 @@ export const startWorker = (
     })
       .then((routeResult) => {
         const baseLogData = {
-          ts: new Date().toISOString(),
           worker: workerName,
           queueName: INGRESS_QUEUE_NAME,
           dlqQueueName: INGRESS_DLQ_QUEUE_NAME,
@@ -471,47 +483,45 @@ export const startWorker = (
         };
 
         if (routeResult.willRetry) {
-          console.warn(
-            JSON.stringify({
+          logger.warn(
+            {
               ...baseLogData,
-              level: 'warn',
               event: 'worker.job.retried',
-            }),
+            },
+            'worker.job.retried',
           );
         } else {
-          console.error(
-            JSON.stringify({
+          logger.error(
+            {
               ...baseLogData,
-              level: 'error',
               event: 'worker.job.failed',
-            }),
+            },
+            'worker.job.failed',
           );
         }
 
         if (routeResult.routedToDlq) {
-          console.error(
-            JSON.stringify({
-              ts: baseLogData.ts,
-              level: 'error',
+          logger.error(
+            {
               event: 'worker.dlq.inflow.alert',
               worker: workerName,
               jobId: baseLogData.jobId,
               dlqJobId: baseLogData.dlqJobId,
               reason: 'retries_exhausted',
               message: 'Job exhausted all retries and was routed to DLQ',
-            }),
+            },
+            'worker.dlq.inflow.alert',
           );
         }
       })
       .catch((routeError: unknown) => {
-        console.error(
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            level: 'error',
+        logger.error(
+          {
             event: 'worker.job.failed.logging_error',
             worker: workerName,
             message: routeError instanceof Error ? routeError.message : String(routeError),
-          }),
+          },
+          'worker.job.failed.logging_error',
         );
       });
   });
@@ -532,15 +542,14 @@ export const startWorker = (
           })
           .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : String(error);
-            console.error(
-              JSON.stringify({
-                ts: new Date().toISOString(),
-                level: 'error',
+            logger.error(
+              {
                 event: 'worker.shutdown.failed',
                 worker: workerName,
                 signal,
                 message,
-              }),
+              },
+              'worker.shutdown.failed',
             );
             process.exit(1);
           });

@@ -1,0 +1,22 @@
+name: K3 Alerting Rules Check
+description: Validates Prometheus alert rules
+
+on: [push, pull_request]
+
+jobs:
+  check-prometheus-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Promtool
+        run: |
+          wget https://github.com/prometheus/prometheus/releases/download/v2.51.1/prometheus-2.51.1.linux-amd64.tar.gz
+          tar xvf prometheus-2.51.1.linux-amd64.tar.gz
+          sudo mv prometheus-2.51.1.linux-amd64/promtool /usr/local/bin/
+
+      - name: Check Prometheus Config
+        run: promtool check config docker/prometheus.yml
+
+      - name: Check Prometheus Rules
+        run: promtool check rules docker/prometheus/alert.rules.yml

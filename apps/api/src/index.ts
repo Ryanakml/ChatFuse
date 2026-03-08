@@ -1,3 +1,7 @@
+import { setupTelemetry, logger } from '@wa-chat/shared';
+// Initialize telemetry before other imports if possible, or right at the top
+setupTelemetry('wa-chat-api');
+
 import express from 'express';
 import dotenv from 'dotenv';
 import { authenticateRequest, requireRole } from './auth.js';
@@ -10,6 +14,7 @@ import {
   createIngressJobPayload,
   type IngressJobPayload,
   type JsonValue,
+  appMetrics,
 } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -99,9 +104,7 @@ const logObservabilityEvent = (
   context: IngressTraceContext,
   attributes: Record<string, unknown>,
 ) => {
-  const message = JSON.stringify({
-    ts: new Date().toISOString(),
-    level,
+  const payload = {
     event,
     traceId: context.traceId,
     correlationId: context.correlationId,
@@ -109,19 +112,9 @@ const logObservabilityEvent = (
     path: context.path,
     sourceIp: context.sourceIp,
     ...attributes,
-  });
+  };
 
-  if (level === 'error') {
-    console.error(message);
-    return;
-  }
-
-  if (level === 'warn') {
-    console.warn(message);
-    return;
-  }
-
-  console.log(message);
+  logger[level](payload, event);
 };
 
 const createDefaultIngressObservability = (): IngressObservability => {
@@ -406,6 +399,24 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
     },
   });
 
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    res.on('finish', () => {
+      const durationMs = Date.now() - startTime;
+      const attributes = {
+        method: req.method,
+        route: req.route?.path || req.path,
+        status: String(res.statusCode),
+      };
+      appMetrics.apiRequestCount.add(1, attributes);
+      appMetrics.apiLatency.record(durationMs, attributes);
+      if (res.statusCode >= 500) {
+        appMetrics.apiErrorCount.add(1, attributes);
+      }
+    });
+    next();
+  });
+
   app.set('trust proxy', trustProxy ? 1 : false);
 
   const normalizeIp = (ip: string) => ip.replace(/^::ffff:/, '');
@@ -633,6 +644,10 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
           createIngressJobPayload({
             eventKey,
             payload: coerceJsonValue(payload),
+            traceContext: {
+              traceId: ingressContext.traceId,
+              correlationId: ingressContext.correlationId,
+            },
           }),
         );
         observability.onEnqueueSuccess(ingressContext, {
@@ -710,7 +725,7 @@ export const startServer = (runtimeEnv: NodeJS.ProcessEnv) => {
 
   const app = createApp(runtimeEnv);
   return app.listen(port, () => {
-    console.log(`API listening on ${port}`);
+    logger.info(`API listening on ${port}`);
   });
 };
 

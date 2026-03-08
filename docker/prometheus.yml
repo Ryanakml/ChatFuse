@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 1s # Set small scrape interval since we're simulating fast
+
+rule_files:
+  - prometheus/alert.rules.yml
+
+scrape_configs:
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['wa-chat-otel-collector:8889']
+  - job_name: 'simulator'
+    static_configs:
+      - targets: ['host.docker.internal:9091']

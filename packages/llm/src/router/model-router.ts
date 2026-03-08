@@ -6,6 +6,7 @@ import { createOpenAIAdapter } from '../providers/openai.js';
 import type { OpenAIConfiguration } from '../providers/openai.js';
 import { createGeminiAdapter } from '../providers/gemini.js';
 import type { GeminiConfiguration } from '../providers/gemini.js';
+import { appMetrics } from '@wa-chat/shared';
 
 export interface ModelRouterConfig {
   primaryConfig?: OpenAIConfiguration;
@@ -24,7 +25,15 @@ export function createModelRouter(
   const primaryModel = createOpenAIAdapter(config?.primaryConfig);
 
   // 2. Gemini as fallback on defined failure conditions (configured with its own retry rules)
-  const fallbackModel = createGeminiAdapter(config?.fallbackConfig);
+  const fallbackModel = createGeminiAdapter(config?.fallbackConfig).withConfig({
+    callbacks: [
+      {
+        handleLLMStart: () => {
+          appMetrics.agentProviderFallbackCount.add(1);
+        },
+      },
+    ],
+  });
 
   return primaryModel.withFallbacks({
     fallbacks: [fallbackModel],
@@ -40,7 +49,17 @@ export function createStructuredModelRouter<T>(
   config?: ModelRouterConfig,
 ): RunnableWithFallbacks<unknown, T> {
   const primaryModel = createOpenAIAdapter(config?.primaryConfig).withStructuredOutput(schema);
-  const fallbackModel = createGeminiAdapter(config?.fallbackConfig).withStructuredOutput(schema);
+  const fallbackModel = createGeminiAdapter(config?.fallbackConfig)
+    .withStructuredOutput(schema)
+    .withConfig({
+      callbacks: [
+        {
+          handleLLMStart: () => {
+            appMetrics.agentProviderFallbackCount.add(1);
+          },
+        },
+      ],
+    });
 
   return primaryModel.withFallbacks({
     fallbacks: [fallbackModel],
