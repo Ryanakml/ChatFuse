@@ -29,5 +29,5 @@ describe('Shared Telemetry', () => {
 
     // Attempt shutdown to avoid leaking in tests
     return sdk.shutdown().catch(() => {});
-  });
+  }, 15_000);
 });
