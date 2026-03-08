@@ -14,6 +14,15 @@ conversationsRouter.get('/', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch conversations' });
     }
 });
+conversationsRouter.get('/escalations', async (req, res) => {
+    try {
+        const list = await conversationRepository.listUnresolvedConversations();
+        res.json(list);
+    }
+    catch {
+        res.status(500).json({ error: 'Failed to fetch escalations' });
+    }
+});
 conversationsRouter.get('/:id/timeline', async (req, res) => {
     try {
         const timeline = await conversationRepository.getConversationTimeline(req.params.id);
@@ -58,6 +67,30 @@ conversationsRouter.post('/:id/messages', async (req, res) => {
     }
     catch {
         res.status(500).json({ error: 'Failed to send message' });
+    }
+});
+conversationsRouter.post('/:id/assign', async (req, res) => {
+    try {
+        const { operatorId } = req.body;
+        await conversationRepository.assignConversationOwner(req.params.id, operatorId ?? null);
+        res.json({ success: true });
+    }
+    catch {
+        res.status(500).json({ error: 'Failed to assign conversation' });
+    }
+});
+conversationsRouter.post('/:id/status', async (req, res) => {
+    try {
+        const { status } = req.body;
+        if (!['open', 'pending', 'resolved'].includes(status)) {
+            res.status(400).json({ error: 'Invalid status' });
+            return;
+        }
+        await conversationRepository.updateEscalationStatus(req.params.id, status);
+        res.json({ success: true });
+    }
+    catch {
+        res.status(500).json({ error: 'Failed to update conversation status' });
     }
 });
 //# sourceMappingURL=conversations.js.map

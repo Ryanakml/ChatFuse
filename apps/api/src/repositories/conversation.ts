@@ -1,4 +1,8 @@
-import type { ConversationSummary, ConversationTimelineItem } from '@wa-chat/shared';
+import type {
+  ConversationSummary,
+  ConversationTimelineItem,
+  EscalationStatus,
+} from '@wa-chat/shared';
 
 // In-memory mock for now to satisfy J2 until DB is fully wired for conversations
 // In a real scenario, this fetches from Supabase
@@ -18,6 +22,19 @@ const mockConversations: ConversationSummary[] = [
     lastMessageAt: new Date(Date.now() - 3600000).toISOString(),
     createdAt: new Date(Date.now() - 172800000).toISOString(),
     botActive: false,
+    escalationStatus: 'open',
+    slaBreachAt: new Date(Date.now() + 7200000).toISOString(), // Breach in 2 hours
+  },
+  {
+    id: 'conv_3',
+    userId: 'user_789',
+    status: 'escalated',
+    lastMessageAt: new Date(Date.now() - 7200000).toISOString(),
+    createdAt: new Date(Date.now() - 259200000).toISOString(),
+    botActive: false,
+    escalationStatus: 'pending',
+    assignedTo: 'some-operator-id',
+    slaBreachAt: new Date(Date.now() - 3600000).toISOString(), // Breached 1 hour ago
   },
 ];
 
@@ -81,6 +98,16 @@ export class ConversationRepository {
     return mockConversations;
   }
 
+  async listUnresolvedConversations(): Promise<ConversationSummary[]> {
+    return mockConversations
+      .filter((c) => c.escalationStatus === 'open' || c.escalationStatus === 'pending')
+      .sort((a, b) => {
+        const timeA = a.slaBreachAt ? new Date(a.slaBreachAt).getTime() : Infinity;
+        const timeB = b.slaBreachAt ? new Date(b.slaBreachAt).getTime() : Infinity;
+        return timeA - timeB;
+      });
+  }
+
   async getConversationTimeline(conversationId: string): Promise<ConversationTimelineItem[]> {
     return mockTimeline[conversationId] || [];
   }
@@ -132,6 +159,23 @@ export class ConversationRepository {
       content,
       createdAt: new Date().toISOString(),
     });
+  }
+
+  async assignConversationOwner(conversationId: string, operatorId: string | null): Promise<void> {
+    const conv = mockConversations.find((c) => c.id === conversationId);
+    if (conv && conv.status === 'escalated') {
+      conv.assignedTo = operatorId;
+    }
+  }
+
+  async updateEscalationStatus(conversationId: string, status: EscalationStatus): Promise<void> {
+    const conv = mockConversations.find((c) => c.id === conversationId);
+    if (conv && conv.status === 'escalated') {
+      conv.escalationStatus = status;
+      if (status === 'resolved') {
+        conv.status = 'resolved';
+      }
+    }
   }
 }
 

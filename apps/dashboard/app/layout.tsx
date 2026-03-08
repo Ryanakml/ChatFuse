@@ -40,6 +40,9 @@ export default function RootLayout({
             <Link href="/conversations" className="text-gray-600 hover:text-gray-900">
               Conversations
             </Link>
+            <Link href="/escalations" className="text-gray-600 hover:text-gray-900">
+              Escalations
+            </Link>
           </nav>
         </div>
         {children}

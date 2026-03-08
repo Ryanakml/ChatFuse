@@ -16,6 +16,19 @@ const mockConversations = [
         lastMessageAt: new Date(Date.now() - 3600000).toISOString(),
         createdAt: new Date(Date.now() - 172800000).toISOString(),
         botActive: false,
+        escalationStatus: 'open',
+        slaBreachAt: new Date(Date.now() + 7200000).toISOString(), // Breach in 2 hours
+    },
+    {
+        id: 'conv_3',
+        userId: 'user_789',
+        status: 'escalated',
+        lastMessageAt: new Date(Date.now() - 7200000).toISOString(),
+        createdAt: new Date(Date.now() - 259200000).toISOString(),
+        botActive: false,
+        escalationStatus: 'pending',
+        assignedTo: 'some-operator-id',
+        slaBreachAt: new Date(Date.now() - 3600000).toISOString(), // Breached 1 hour ago
     },
 ];
 const mockTimeline = {
@@ -76,6 +89,15 @@ export class ConversationRepository {
     async listActiveConversations() {
         return mockConversations;
     }
+    async listUnresolvedConversations() {
+        return mockConversations
+            .filter((c) => c.escalationStatus === 'open' || c.escalationStatus === 'pending')
+            .sort((a, b) => {
+            const timeA = a.slaBreachAt ? new Date(a.slaBreachAt).getTime() : Infinity;
+            const timeB = b.slaBreachAt ? new Date(b.slaBreachAt).getTime() : Infinity;
+            return timeA - timeB;
+        });
+    }
     async getConversationTimeline(conversationId) {
         return mockTimeline[conversationId] || [];
     }
@@ -123,6 +145,21 @@ export class ConversationRepository {
             content,
             createdAt: new Date().toISOString(),
         });
+    }
+    async assignConversationOwner(conversationId, operatorId) {
+        const conv = mockConversations.find((c) => c.id === conversationId);
+        if (conv && conv.status === 'escalated') {
+            conv.assignedTo = operatorId;
+        }
+    }
+    async updateEscalationStatus(conversationId, status) {
+        const conv = mockConversations.find((c) => c.id === conversationId);
+        if (conv && conv.status === 'escalated') {
+            conv.escalationStatus = status;
+            if (status === 'resolved') {
+                conv.status = 'resolved';
+            }
+        }
     }
 }
 export const conversationRepository = new ConversationRepository();

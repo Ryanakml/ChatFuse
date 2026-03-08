@@ -16,11 +16,13 @@ export type AgentDecisionEvent = {
   createdAt: string;
 };
 
-export type ConversationTimelineItem = 
+export type ConversationTimelineItem =
   | ({ type: 'message' } & ConversationMessage)
   | ({ type: 'event' } & AgentDecisionEvent);
 
 export type ConversationStatus = 'active' | 'escalated' | 'resolved';
+
+export type EscalationStatus = 'open' | 'pending' | 'resolved';
 
 export type ConversationSummary = {
   id: string;
@@ -29,6 +31,9 @@ export type ConversationSummary = {
   lastMessageAt: string;
   createdAt: string;
   botActive: boolean;
+  assignedTo?: string | null;
+  escalationStatus?: EscalationStatus | null;
+  slaBreachAt?: string | null;
 };
 
 export type OperatorTakeoverRequest = {
@@ -39,5 +44,13 @@ export type OperatorTakeoverRequest = {
 export type OperatorMessageRequest = {
   conversationId: string;
   content: string;
-  operatorId: string;
+  operatorId: string; // auth.users ID
+};
+
+export type AssignOwnerRequest = {
+  operatorId: string | null; // null to unassign
+};
+
+export type UpdateEscalationStatusRequest = {
+  status: EscalationStatus;
 };

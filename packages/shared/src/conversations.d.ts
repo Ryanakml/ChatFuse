@@ -19,6 +19,7 @@ export type ConversationTimelineItem = ({
     type: 'event';
 } & AgentDecisionEvent);
 export type ConversationStatus = 'active' | 'escalated' | 'resolved';
+export type EscalationStatus = 'open' | 'pending' | 'resolved';
 export type ConversationSummary = {
     id: string;
     userId: string;
@@ -26,6 +27,9 @@ export type ConversationSummary = {
     lastMessageAt: string;
     createdAt: string;
     botActive: boolean;
+    assignedTo?: string | null;
+    escalationStatus?: EscalationStatus | null;
+    slaBreachAt?: string | null;
 };
 export type OperatorTakeoverRequest = {
     conversationId: string;
@@ -35,5 +39,11 @@ export type OperatorMessageRequest = {
     conversationId: string;
     content: string;
     operatorId: string;
+};
+export type AssignOwnerRequest = {
+    operatorId: string | null;
+};
+export type UpdateEscalationStatusRequest = {
+    status: EscalationStatus;
 };
 //# sourceMappingURL=conversations.d.ts.map
