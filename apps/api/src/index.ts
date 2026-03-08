@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { authenticateRequest, requireRole } from './auth.js';
 import { conversationsRouter } from './routes/conversations.js';
+import { kpisRouter } from './routes/kpis.js';
 import { resolveWorkerRetryPolicy, type WorkerRetryPolicy, validateEnv } from '@wa-chat/config';
 import {
   INGRESS_JOB_NAME,
@@ -661,6 +662,7 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
   });
 
   app.use('/api/conversations', conversationsRouter);
+  app.use('/api/kpis', kpisRouter);
 
   app.use(
     (

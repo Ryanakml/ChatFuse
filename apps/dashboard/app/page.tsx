@@ -1,6 +1,7 @@
 import { getCurrentSession } from '@/lib/supabase/auth';
 import { handleSignOut } from './actions';
 import { redirect } from 'next/navigation';
+import { KpiDashboard } from '@/components/kpi-dashboard';
 
 export default async function DashboardHome() {
   const session = await getCurrentSession();
@@ -69,6 +70,13 @@ export default async function DashboardHome() {
             </div>
           )}
         </section>
+
+        {(session.role === 'admin' || session.role === 'analyst') && (
+          <section className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h2 className="text-lg font-medium mb-4 text-gray-800">Operational KPIs</h2>
+            <KpiDashboard />
+          </section>
+        )}
       </main>
     </div>
   );

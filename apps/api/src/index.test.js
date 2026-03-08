@@ -506,6 +506,12 @@ try {
             assert.ok(p95 <= 1_500, `Expected ACK p95 <= 1500ms, received ${p95}ms`);
         });
     });
+    await runTest('GET /api/kpis requires authentication', async () => {
+        await withServer({}, async (baseUrl) => {
+            const res = await fetch(`${baseUrl}/api/kpis`);
+            assert.equal(res.status, 401);
+        });
+    });
 }
 finally {
     console.log('\n' + '-'.repeat(40));

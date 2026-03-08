@@ -71,4 +71,5 @@ export declare const APP_ROLES: readonly ["admin", "support_agent", "analyst"];
 export type AppRole = (typeof APP_ROLES)[number];
 export * from './rag.js';
 export * from './conversations.js';
+export * from './metrics.js';
 //# sourceMappingURL=index.d.ts.map
