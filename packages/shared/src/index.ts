@@ -75,13 +75,15 @@ const isNullableInteger = (
     minimum: number;
   },
 ): value is number | null =>
-  value === null || (typeof value === 'number' && Number.isInteger(value) && value >= options.minimum);
+  value === null ||
+  (typeof value === 'number' && Number.isInteger(value) && value >= options.minimum);
 
 const isNullableFiniteNumber = (value: unknown): value is number | null =>
   value === null || (typeof value === 'number' && Number.isFinite(value));
 
 const isNullableJitter = (value: unknown): value is number | null =>
-  value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
+  value === null ||
+  (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
 
 export const isJsonValue = (value: unknown): value is JsonValue => {
   if (
@@ -303,4 +305,7 @@ export const createIngressDlqJobPayload = (
 
   return assertIngressDlqJobPayload(payload);
 };
+export const APP_ROLES = ['admin', 'support_agent', 'analyst'] as const;
+export type AppRole = (typeof APP_ROLES)[number];
+
 export * from './rag.js';

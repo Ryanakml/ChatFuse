@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import { authenticateRequest, requireRole } from './auth.js';
 import { resolveWorkerRetryPolicy, validateEnv } from '@wa-chat/config';
 import { INGRESS_JOB_NAME, INGRESS_QUEUE_NAME, createIngressJobPayload, } from '@wa-chat/shared';
 import { pathToFileURL } from 'node:url';
@@ -474,6 +475,10 @@ export const createApp = (runtimeEnv, options = {}) => {
         res.status(200).json({ ok: true });
     });
     app.get('/admin/health', enforceAdminAccess, (_req, res) => {
+        res.json({ ok: true });
+    });
+    // Example RBAC-protected endpoint implementation
+    app.post('/api/protected/admin-only', authenticateRequest, requireRole('admin'), (req, res) => {
         res.json({ ok: true });
     });
     app.use((error, req, res, next) => {

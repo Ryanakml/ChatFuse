@@ -1,52 +1,60 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
 
-const allowInsecureHttp = process.env.ALLOW_INSECURE_HTTP === 'true';
-const authHeaderName = process.env.DASHBOARD_AUTH_HEADER ?? 'x-wa-user';
-const roleHeaderName = process.env.DASHBOARD_ROLE_HEADER ?? 'x-wa-role';
-const allowedRoles = (process.env.DASHBOARD_ALLOWED_ROLES ?? 'admin')
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
+export async function middleware(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({
+    request,
+  });
 
-const publicRoutes = ['/health'];
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          supabaseResponse = NextResponse.next({
+            request,
+          });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options),
+          );
+        },
+      },
+    },
+  );
 
-const isSecureRequest = (request: NextRequest) => {
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  if (forwardedProto) {
-    return forwardedProto.split(',')[0]?.trim() === 'https';
-  }
-  return request.nextUrl.protocol === 'https:';
-};
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-export const middleware = (request: NextRequest) => {
-  const pathname = request.nextUrl.pathname;
-
-  if (publicRoutes.some((route) => pathname.startsWith(route))) {
-    return NextResponse.next();
-  }
-
-  const isProduction = process.env.NODE_ENV === 'production';
-
-  if (isProduction && !allowInsecureHttp && !isSecureRequest(request)) {
+  if (
+    !user &&
+    !request.nextUrl.pathname.startsWith('/login') &&
+    !request.nextUrl.pathname.startsWith('/api') &&
+    request.nextUrl.pathname !== '/auth/callback'
+  ) {
+    // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();
-    url.protocol = 'https:';
+    url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  const adminUser = request.headers.get(authHeaderName);
-  if (!adminUser) {
-    return new NextResponse('Unauthorized', { status: 401 });
-  }
-
-  const adminRole = request.headers.get(roleHeaderName);
-  if (!adminRole || !allowedRoles.includes(adminRole)) {
-    return new NextResponse('Forbidden', { status: 403 });
-  }
-
-  return NextResponse.next();
-};
+  return supabaseResponse;
+}
 
 export const config = {
-  matcher: ['/((?!_next|favicon.ico|robots.txt).*)'],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * Feel free to modify this pattern to include more paths.
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 };
