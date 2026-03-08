@@ -1,0 +1,21 @@
+name: K3 Alerting Rules Check
+description: Validates Prometheus alert rules
+
+on: [push, pull_request]
+
+jobs:
+  check-prometheus-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Promtool
+        uses: promlabs/promtool-action@v2
+        with:
+          version: '2.51.1'
+
+      - name: Check Prometheus Config
+        run: promtool check config docker/prometheus.yml
+
+      - name: Check Prometheus Rules
+        run: promtool check rules docker/prometheus/alert.rules.yml

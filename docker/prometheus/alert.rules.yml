@@ -1,0 +1,59 @@
+groups:
+  - name: wa-chat-alerts
+    rules:
+      # 1. Webhook verification failure spike
+      # Alerts if verification failures (401 invalid signature/missing signature) exceed 10 in 5 minutes
+      - alert: WebhookVerificationFailureSpike
+        expr: sum(rate(api_request_count_total{route="/webhook", status="401"}[5m])) * 300 > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High rate of webhook verification failures'
+          description: 'More than 10 webhook verification failures in the last 5 minutes. Check WhatsApp app secret and configuration.'
+          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#webhook-verification-failure'
+
+      # 2. ACK latency breach
+      # Alerts if the p95 latency for webhook POST requests is greater than 1500ms over 5 minutes
+      - alert: WebhookAckLatencyBreach
+        expr: histogram_quantile(0.95, sum(rate(api_latency_ms_bucket{route="/webhook", method="POST"}[5m])) by (le)) > 1500
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Webhook ACK latency breach (p95 > 1.5s)'
+          description: 'The 95th percentile latency for webhook ingress is exceeding the 1.5 second SLA.'
+          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#ack-latency-breach'
+
+      # 3. DLQ spike
+      # Alerts if the dead letter queue receives more than 5 messages in 5 minutes
+      - alert: DeadLetterQueueSpike
+        expr: sum(rate(queue_dlq_count_total[5m])) * 300 > 5
+        labels:
+          severity: critical
+        annotations:
+          summary: 'High number of DLQ messages'
+          description: 'Multiple messages have permanently failed and entered the DLQ.'
+          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#dlq-spike'
+
+      # 4. Provider outage/fallback surge
+      # Alerts if fallback routing from primary to secondary LLM is frequently triggered
+      - alert: ProviderFallbackSurge
+        expr: sum(rate(agent_provider_fallback_count_total[5m])) * 300 > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High rate of LLM provider fallbacks'
+          description: 'The primary LLM provider may be experiencing an outage or high latency.'
+          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#provider-outage'
+
+      # 5. Escalation ratio spike
+      # Alerts if the ratio of escalated sessions to total sessions is > 20% over 15 minutes
+      - alert: EscalationRatioSpike
+        expr: sum(rate(agent_path_count_total{path="escalation"}[15m])) / sum(rate(agent_path_count_total[15m])) > 0.20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High human escalation ratio'
+          description: 'More than 20% of interactions are escalating to a human agent. The model may be confused or facing systemic tool failures.'
+          runbook_url: 'docs/tickets/subtickets/K4-runbooks.md#escalation-ratio-spike'
