@@ -1,0 +1,138 @@
+import type { ConversationSummary, ConversationTimelineItem } from '@wa-chat/shared';
+
+// In-memory mock for now to satisfy J2 until DB is fully wired for conversations
+// In a real scenario, this fetches from Supabase
+const mockConversations: ConversationSummary[] = [
+  {
+    id: 'conv_1',
+    userId: 'user_123',
+    status: 'active',
+    lastMessageAt: new Date().toISOString(),
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    botActive: true,
+  },
+  {
+    id: 'conv_2',
+    userId: 'user_456',
+    status: 'escalated',
+    lastMessageAt: new Date(Date.now() - 3600000).toISOString(),
+    createdAt: new Date(Date.now() - 172800000).toISOString(),
+    botActive: false,
+  },
+];
+
+const mockTimeline: Record<string, ConversationTimelineItem[]> = {
+  conv_1: [
+    {
+      type: 'message',
+      id: 'msg_1',
+      conversationId: 'conv_1',
+      senderRole: 'user',
+      content: 'Where is my order?',
+      createdAt: new Date(Date.now() - 60000).toISOString(),
+    },
+    {
+      type: 'event',
+      id: 'evt_1',
+      conversationId: 'conv_1',
+      eventType: 'intent_classification',
+      details: { intent: 'order_status', confidence: 0.95 },
+      createdAt: new Date(Date.now() - 58000).toISOString(),
+    },
+    {
+      type: 'event',
+      id: 'evt_2',
+      conversationId: 'conv_1',
+      eventType: 'tool_call',
+      details: { tool: 'lookupOrder', input: { userId: 'user_123' }, status: 'success' },
+      createdAt: new Date(Date.now() - 55000).toISOString(),
+    },
+    {
+      type: 'message',
+      id: 'msg_2',
+      conversationId: 'conv_1',
+      senderRole: 'bot',
+      content: 'Your order is arriving tomorrow.',
+      createdAt: new Date(Date.now() - 50000).toISOString(),
+    },
+  ],
+  conv_2: [
+    {
+      type: 'message',
+      id: 'msg_3',
+      conversationId: 'conv_2',
+      senderRole: 'user',
+      content: 'I need to talk to a human right now! This is ridiculous.',
+      createdAt: new Date(Date.now() - 3600000).toISOString(),
+    },
+    {
+      type: 'event',
+      id: 'evt_3',
+      conversationId: 'conv_2',
+      eventType: 'routing_decision',
+      details: { reason: 'sentiment_negative', action: 'escalate' },
+      createdAt: new Date(Date.now() - 3595000).toISOString(),
+    },
+  ],
+};
+
+export class ConversationRepository {
+  async listActiveConversations(): Promise<ConversationSummary[]> {
+    return mockConversations;
+  }
+
+  async getConversationTimeline(conversationId: string): Promise<ConversationTimelineItem[]> {
+    return mockTimeline[conversationId] || [];
+  }
+
+  async takeoverConversation(conversationId: string, operatorId: string): Promise<void> {
+    const conv = mockConversations.find((c) => c.id === conversationId);
+    if (conv) {
+      conv.botActive = false;
+      // Also log takeover event
+      if (!mockTimeline[conversationId]) mockTimeline[conversationId] = [];
+      mockTimeline[conversationId].push({
+        type: 'event',
+        id: `evt_takeover_${Date.now()}`,
+        conversationId,
+        eventType: 'routing_decision',
+        details: { action: 'manual_takeover', operatorId },
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  async returnToBot(conversationId: string, operatorId: string): Promise<void> {
+    const conv = mockConversations.find((c) => c.id === conversationId);
+    if (conv) {
+      conv.botActive = true;
+      if (!mockTimeline[conversationId]) mockTimeline[conversationId] = [];
+      mockTimeline[conversationId].push({
+        type: 'event',
+        id: `evt_return_${Date.now()}`,
+        conversationId,
+        eventType: 'routing_decision',
+        details: { action: 'return_to_bot', operatorId },
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  async addOperatorMessage(
+    conversationId: string,
+    operatorId: string,
+    content: string,
+  ): Promise<void> {
+    if (!mockTimeline[conversationId]) mockTimeline[conversationId] = [];
+    mockTimeline[conversationId].push({
+      type: 'message',
+      id: `msg_op_${Date.now()}`,
+      conversationId,
+      senderRole: 'agent',
+      content,
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
+
+export const conversationRepository = new ConversationRepository();

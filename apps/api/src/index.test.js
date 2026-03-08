@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { INGRESS_JOB_SCHEMA_VERSION } from '@wa-chat/shared';
+import './repositories/index.test.js';
 import { createApp, createIngressQueueRetryJobOptions } from './index.js';
 const color = {
     reset: '\x1b[0m',

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { INGRESS_JOB_SCHEMA_VERSION } from '@wa-chat/shared';
+import './repositories/index.test.js';
 import type {
   IdempotencyStore,
   IngressJobPayload,
@@ -194,7 +195,9 @@ async function withServer<T>(
   }
 }
 
-console.log(`${color.cyan}API Endpoint + Retry Config Tests (E1 + E2 + E3 + E4 + F2)${color.reset}\n`);
+console.log(
+  `${color.cyan}API Endpoint + Retry Config Tests (E1 + E2 + E3 + E4 + F2)${color.reset}\n`,
+);
 
 try {
   await runTest('createIngressQueueRetryJobOptions uses exponential backoff with jitter', () => {
@@ -265,7 +268,6 @@ try {
       );
     },
   );
-
   await runTest('Webhook verification success', async () => {
     await withServer({}, async (baseUrl) => {
       const res = await fetch(
@@ -336,7 +338,10 @@ try {
       assert.equal(ingressEvents[0]?.context.correlationId, correlationId);
       assert.match(ingressEvents[0]?.context.traceId || '', /^[a-f0-9]{32}$/);
 
-      const enqueueSuccessEvents = getObservabilityEvents(deps.observabilityEvents, 'enqueue_success');
+      const enqueueSuccessEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'enqueue_success',
+      );
       assert.equal(enqueueSuccessEvents.length, 1);
       assert.equal(typeof enqueueSuccessEvents[0]?.eventKey, 'string');
     });
@@ -417,7 +422,10 @@ try {
         },
       });
 
-      const malformedPayloadEvents = getObservabilityEvents(deps.observabilityEvents, 'malformed_payload');
+      const malformedPayloadEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'malformed_payload',
+      );
       assert.equal(malformedPayloadEvents.length, 1);
       assert.equal(malformedPayloadEvents[0]?.reason, 'invalid_structure');
     });
@@ -443,7 +451,10 @@ try {
         },
       });
 
-      const malformedPayloadEvents = getObservabilityEvents(deps.observabilityEvents, 'malformed_payload');
+      const malformedPayloadEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'malformed_payload',
+      );
       assert.equal(malformedPayloadEvents.length, 1);
       assert.equal(malformedPayloadEvents[0]?.reason, 'invalid_json');
     });
@@ -472,7 +483,10 @@ try {
         },
       });
 
-      const malformedPayloadEvents = getObservabilityEvents(deps.observabilityEvents, 'malformed_payload');
+      const malformedPayloadEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'malformed_payload',
+      );
       assert.equal(malformedPayloadEvents.length, 1);
       assert.equal(malformedPayloadEvents[0]?.reason, 'payload_too_large');
     });
@@ -576,7 +590,10 @@ try {
         },
       });
 
-      const enqueueFailureEvents = getObservabilityEvents(deps.observabilityEvents, 'enqueue_failure');
+      const enqueueFailureEvents = getObservabilityEvents(
+        deps.observabilityEvents,
+        'enqueue_failure',
+      );
       assert.equal(enqueueFailureEvents.length, 1);
       assert.equal(enqueueFailureEvents[0]?.errorCode, 'ENQUEUE_FAILED');
     });
