@@ -11,8 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
+  # Build @wa-chat/shared first because dist/ is gitignored.
+  # All jobs that import from it must download the artifact before running.
+  prepare:
+    name: Build shared package
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,12 +28,46 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build @wa-chat/shared
+        run: npm run build --workspace packages/shared
+
+      - name: Upload shared dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dist
+          path: packages/shared/dist/
+          retention-days: 1
+
+  lint:
+    name: Lint
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download shared dist
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-dist
+          path: packages/shared/dist/
 
       - name: Run lint
         run: npm run lint
 
   typecheck:
     name: Type Check
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,12 +81,19 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download shared dist
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-dist
+          path: packages/shared/dist/
 
       - name: Run typecheck
         run: npm run typecheck
 
   test:
     name: Unit & Integration Tests
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -64,6 +107,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download shared dist
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-dist
+          path: packages/shared/dist/
 
       - name: Run tests
         run: npm run test
@@ -88,6 +137,7 @@ jobs:
 
   build:
     name: Build
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -101,6 +151,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download shared dist
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-dist
+          path: packages/shared/dist/
 
       - name: Build all workspaces
         run: npm run build
