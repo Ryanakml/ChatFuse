@@ -42,11 +42,14 @@ async function withServer<T>(
 ): Promise<T> {
   const env: NodeJS.ProcessEnv = {
     NODE_ENV: 'test',
+    ALLOW_INSECURE_HTTP: 'true',
     PORT: '0',
     WHATSAPP_VERIFY_TOKEN: 'verify-token-e2e',
     WHATSAPP_APP_SECRET: 'secret-e2e',
     WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
     WHATSAPP_ACCESS_TOKEN: 'token-e2e',
+    OPENAI_API_KEY: 'openai-key-e2e',
+    GEMINI_API_KEY: 'gemini-key-e2e',
     REDIS_URL: 'redis://localhost:6379',
     SUPABASE_URL: 'https://mock.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'mock-key',
@@ -112,77 +115,81 @@ async function withServer<T>(
 
 console.log(`${color.cyan}E2E: Duplicate Message Replay (L2 – E2E)${color.reset}\n`);
 
-await runTest('Second identical webhook is acknowledged but not enqueued twice', async () => {
-  await withServer(async (baseUrl, enqueuedJobs, duplicateHits) => {
-    const waPayload = JSON.stringify({
-      object: 'whatsapp_business_account',
-      entry: [
-        {
-          changes: [
-            {
-              value: {
-                messages: [{ id: 'wamid-dup-001', type: 'text', text: { body: 'hello' } }],
-              },
-            },
-          ],
-        },
-      ],
-    });
-    const signature = signBody(waPayload, 'secret-e2e');
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Hub-Signature-256': signature,
-    };
-
-    const res1 = await fetch(`${baseUrl}/webhook`, { method: 'POST', headers, body: waPayload });
-    assert.equal(res1.status, 200, 'First delivery should succeed with 200');
-    assert.equal(enqueuedJobs.length, 1, 'First delivery must enqueue exactly 1 job');
-
-    const res2 = await fetch(`${baseUrl}/webhook`, { method: 'POST', headers, body: waPayload });
-    assert.equal(res2.status, 200, 'Duplicate delivery must still return 200 (ACK)');
-    assert.equal(enqueuedJobs.length, 1, 'Duplicate must NOT enqueue a second job');
-    assert.equal(duplicateHits.length, 1, 'Duplicate hit observability must be triggered once');
-  });
-});
-
-await runTest('Different message IDs are enqueued independently', async () => {
-  await withServer(async (baseUrl, enqueuedJobs) => {
-    function makePayload(msgId: string) {
-      return JSON.stringify({
+const main = async () => {
+  await runTest('Second identical webhook is acknowledged but not enqueued twice', async () => {
+    await withServer(async (baseUrl, enqueuedJobs, duplicateHits) => {
+      const waPayload = JSON.stringify({
         object: 'whatsapp_business_account',
         entry: [
           {
             changes: [
               {
                 value: {
-                  messages: [{ id: msgId, type: 'text', text: { body: 'hello' } }],
+                  messages: [{ id: 'wamid-dup-001', type: 'text', text: { body: 'hello' } }],
                 },
               },
             ],
           },
         ],
       });
-    }
+      const signature = signBody(waPayload, 'secret-e2e');
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': signature,
+      };
 
-    for (let i = 0; i < 3; i++) {
-      const body = makePayload(`wamid-unique-${i}`);
-      await fetch(`${baseUrl}/webhook`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Hub-Signature-256': signBody(body, 'secret-e2e'),
-        },
-        body,
-      });
-    }
+      const res1 = await fetch(`${baseUrl}/webhook`, { method: 'POST', headers, body: waPayload });
+      assert.equal(res1.status, 200, 'First delivery should succeed with 200');
+      assert.equal(enqueuedJobs.length, 1, 'First delivery must enqueue exactly 1 job');
 
-    assert.equal(enqueuedJobs.length, 3, 'Three distinct messages should create 3 jobs');
+      const res2 = await fetch(`${baseUrl}/webhook`, { method: 'POST', headers, body: waPayload });
+      assert.equal(res2.status, 200, 'Duplicate delivery must still return 200 (ACK)');
+      assert.equal(enqueuedJobs.length, 1, 'Duplicate must NOT enqueue a second job');
+      assert.equal(duplicateHits.length, 1, 'Duplicate hit observability must be triggered once');
+    });
   });
-});
 
-if (failed > 0) {
-  console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
-  process.exit(1);
-} else {
-  console.log(`\n${color.green}All duplicate replay E2E tests passed.${color.reset}`);
-}
+  await runTest('Different message IDs are enqueued independently', async () => {
+    await withServer(async (baseUrl, enqueuedJobs) => {
+      function makePayload(msgId: string) {
+        return JSON.stringify({
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    messages: [{ id: msgId, type: 'text', text: { body: 'hello' } }],
+                  },
+                },
+              ],
+            },
+          ],
+        });
+      }
+
+      for (let i = 0; i < 3; i++) {
+        const body = makePayload(`wamid-unique-${i}`);
+        await fetch(`${baseUrl}/webhook`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Hub-Signature-256': signBody(body, 'secret-e2e'),
+          },
+          body,
+        });
+      }
+
+      assert.equal(enqueuedJobs.length, 3, 'Three distinct messages should create 3 jobs');
+    });
+  });
+
+  if (failed > 0) {
+    console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
+    process.exit(1);
+  } else {
+    console.log(`\n${color.green}All duplicate replay E2E tests passed.${color.reset}`);
+  }
+};
+
+void main();

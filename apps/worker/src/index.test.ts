@@ -8,6 +8,8 @@ import {
   DEFAULT_WORKER_RETRY_PERMANENT_MAX_ATTEMPTS,
   DEFAULT_WORKER_RETRY_TRANSIENT_MAX_ATTEMPTS,
   buildIngressDlqPayloadFromFailure,
+  createDefaultProcessor,
+  extractOutboundMessageFromIngressPayload,
   resolveWillRetry,
   resolveWorkerPolicies,
   routeFailedIngressJobToDlq,
@@ -102,6 +104,97 @@ try {
         }),
       /WORKER_RETRY_BACKOFF_JITTER must be a number between 0 and 1/,
     );
+  });
+
+  await runTest('extractOutboundMessageFromIngressPayload returns target and message text', () => {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid-outbound-001',
+                    from: '6281234567890',
+                    text: { body: 'halo bot' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const outbound = extractOutboundMessageFromIngressPayload(payload);
+    assert.deepEqual(outbound, { to: '6281234567890', text: 'halo bot' });
+  });
+
+  await runTest('createDefaultProcessor sends outbound WhatsApp text via Graph API', async () => {
+    let calledUrl = '';
+    let calledMethod = '';
+    let calledAuth = '';
+    let calledBody = '';
+
+    const processor = createDefaultProcessor(
+      {
+        WHATSAPP_PHONE_NUMBER_ID: 'phone-id-test',
+        WHATSAPP_ACCESS_TOKEN: 'token-test',
+      },
+      async (input, init) => {
+        calledUrl = input;
+        calledMethod = init.method;
+        calledAuth = init.headers.Authorization ?? '';
+        calledBody = init.body;
+
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '{"messages":[{"id":"wamid.outbound.001"}]}',
+        };
+      },
+    );
+
+    await processor(
+      createIngressJobPayload({
+        eventKey: 'message:wamid-outbound-processor-001',
+        payload: {
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    messages: [
+                      {
+                        id: 'wamid-inbound-processor-001',
+                        from: '6289876543210',
+                        text: { body: 'test outbound' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    assert.equal(calledUrl, 'https://graph.facebook.com/v22.0/phone-id-test/messages');
+    assert.equal(calledMethod, 'POST');
+    assert.equal(calledAuth, 'Bearer token-test');
+
+    const parsedBody = JSON.parse(calledBody) as {
+      to: string;
+      type: string;
+      text: { body: string };
+    };
+    assert.equal(parsedBody.to, '6289876543210');
+    assert.equal(parsedBody.type, 'text');
+    assert.match(parsedBody.text.body, /test outbound/);
   });
 
   await runTest(

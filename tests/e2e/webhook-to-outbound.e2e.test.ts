@@ -11,6 +11,7 @@ import type {
   IngressTraceContext,
 } from '../../apps/api/src/index.js';
 import { createApp } from '../../apps/api/src/index.js';
+import { createDefaultProcessor } from '../../apps/worker/src/index.js';
 import { runIngressJob } from '../../apps/worker/src/queue/consumer.js';
 import { INGRESS_JOB_NAME } from '@wa-chat/shared';
 
@@ -38,11 +39,14 @@ async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
 function buildEnv(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'test',
+    ALLOW_INSECURE_HTTP: 'true',
     PORT: '0',
     WHATSAPP_VERIFY_TOKEN: 'verify-token-e2e',
     WHATSAPP_APP_SECRET: 'secret-e2e',
     WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
     WHATSAPP_ACCESS_TOKEN: 'token-e2e',
+    OPENAI_API_KEY: 'openai-key-e2e',
+    GEMINI_API_KEY: 'gemini-key-e2e',
     REDIS_URL: 'redis://localhost:6379',
     SUPABASE_URL: 'https://mock.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'mock-key',
@@ -116,89 +120,133 @@ console.log(
   `${color.cyan}E2E: Webhook Ingest → Queue → Agent → Outbound Send (L2 – E2E)${color.reset}\n`,
 );
 
-await runTest('POST /webhook with valid signature → 200 and job is enqueued', async () => {
-  await withServer(async (baseUrl, enqueuedJobs) => {
-    const payload = JSON.stringify({ object: 'whatsapp_business_account' });
-    const signature = signBody(payload, 'secret-e2e');
+const main = async () => {
+  await runTest('POST /webhook with valid signature → 200 and job is enqueued', async () => {
+    await withServer(async (baseUrl, enqueuedJobs) => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const signature = signBody(payload, 'secret-e2e');
 
-    const res = await fetch(`${baseUrl}/webhook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hub-Signature-256': signature,
-        'X-Correlation-ID': 'e2e-correlation-001',
-      },
-      body: payload,
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hub-Signature-256': signature,
+          'X-Correlation-ID': 'e2e-correlation-001',
+        },
+        body: payload,
+      });
+
+      assert.equal(res.status, 200);
+      assert.equal(enqueuedJobs.length, 1);
     });
-
-    assert.equal(res.status, 200);
-    assert.equal(enqueuedJobs.length, 1);
   });
-});
 
-await runTest('Enqueued job contains eventKey, traceId, and correlationId', async () => {
-  await withServer(async (baseUrl, enqueuedJobs) => {
-    const payload = JSON.stringify({ object: 'whatsapp_business_account' });
-    const signature = signBody(payload, 'secret-e2e');
+  await runTest('Enqueued job contains eventKey, traceId, and correlationId', async () => {
+    await withServer(async (baseUrl, enqueuedJobs) => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account' });
+      const signature = signBody(payload, 'secret-e2e');
 
-    await fetch(`${baseUrl}/webhook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hub-Signature-256': signature,
-        'X-Correlation-ID': 'e2e-correlation-002',
-      },
-      body: payload,
+      await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hub-Signature-256': signature,
+          'X-Correlation-ID': 'e2e-correlation-002',
+        },
+        body: payload,
+      });
+
+      const job = enqueuedJobs[0];
+      assert.ok(job, 'Job must be present');
+      assert.ok(job.eventKey, 'eventKey must be present');
+      assert.ok(job.traceContext, 'traceContext must be present');
+      assert.ok(job.traceContext.traceId, 'traceId must be present');
+      assert.equal(job.traceContext.correlationId, 'e2e-correlation-002');
     });
-
-    const job = enqueuedJobs[0];
-    assert.ok(job, 'Job must be present');
-    assert.ok(job.eventKey, 'eventKey must be present');
-    assert.ok(job.traceContext, 'traceContext must be present');
-    assert.ok(job.traceContext.traceId, 'traceId must be present');
-    assert.equal(job.traceContext.correlationId, 'e2e-correlation-002');
   });
-});
 
-await runTest('Worker processor receives and handles the enqueued job payload', async () => {
-  await withServer(async (baseUrl, enqueuedJobs) => {
-    const payload = JSON.stringify({ object: 'whatsapp_business_account' });
-    const signature = signBody(payload, 'secret-e2e');
+  await runTest('Default worker processor sends outbound WhatsApp message', async () => {
+    await withServer(async (baseUrl, enqueuedJobs) => {
+      const payload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    {
+                      id: 'wamid-e2e-001',
+                      from: '628111222333',
+                      type: 'text',
+                      text: { body: 'hello from e2e' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const signature = signBody(payload, 'secret-e2e');
 
-    await fetch(`${baseUrl}/webhook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hub-Signature-256': signature,
-      },
-      body: payload,
+      await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hub-Signature-256': signature,
+        },
+        body: payload,
+      });
+
+      assert.equal(enqueuedJobs.length, 1);
+
+      let calledUrl = '';
+      let calledBody = '';
+
+      const processor = createDefaultProcessor(
+        {
+          WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
+          WHATSAPP_ACCESS_TOKEN: 'token-e2e',
+        },
+        async (input, init) => {
+          calledUrl = input;
+          calledBody = init.body;
+          return {
+            ok: true,
+            status: 200,
+            text: async () => '{"messages":[{"id":"wamid.mock.outbound"}]}',
+          };
+        },
+      );
+
+      await runIngressJob({
+        jobName: INGRESS_JOB_NAME,
+        jobData: enqueuedJobs[0],
+        policies: {
+          concurrency: 1,
+          jobTimeoutMs: 5000,
+          retry: { transientMaxAttempts: 3, permanentMaxAttempts: 1 },
+        },
+        processor,
+      });
+
+      assert.equal(calledUrl, 'https://graph.facebook.com/v22.0/phone-e2e/messages');
+      const outboundPayload = JSON.parse(calledBody) as {
+        to: string;
+        text: { body: string };
+      };
+      assert.equal(outboundPayload.to, '628111222333');
+      assert.match(outboundPayload.text.body, /hello from e2e/);
     });
-
-    assert.equal(enqueuedJobs.length, 1);
-    const jobData = enqueuedJobs[0];
-    const processedEventKeys: string[] = [];
-
-    await runIngressJob({
-      jobName: INGRESS_JOB_NAME,
-      jobData,
-      policies: {
-        concurrency: 1,
-        jobTimeoutMs: 5000,
-        retry: { transientMaxAttempts: 3, permanentMaxAttempts: 1 },
-      },
-      processor: async (ingressPayload) => {
-        processedEventKeys.push(ingressPayload.eventKey);
-      },
-    });
-
-    assert.equal(processedEventKeys.length, 1);
-    assert.ok(processedEventKeys[0] && processedEventKeys[0].length > 0);
   });
-});
 
-if (failed > 0) {
-  console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
-  process.exit(1);
-} else {
-  console.log(`\n${color.green}All E2E webhook-to-outbound tests passed.${color.reset}`);
-}
+  if (failed > 0) {
+    console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
+    process.exit(1);
+  } else {
+    console.log(`\n${color.green}All E2E webhook-to-outbound tests passed.${color.reset}`);
+  }
+};
+
+void main();

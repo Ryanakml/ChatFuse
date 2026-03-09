@@ -27,6 +27,7 @@ import {
   classifyWorkerError,
   createIngressQueueWorker,
   type IngressJobProcessor,
+  WorkerPermanentError,
   type WorkerPolicies,
 } from './queue/consumer.js';
 
@@ -331,24 +332,182 @@ export type WorkerService = {
   close: () => Promise<void>;
 };
 
+type FetchResponseLike = {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+};
+
+type FetchLike = (
+  input: string,
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+  },
+) => Promise<FetchResponseLike>;
+
+type OutboundMessage = {
+  to: string;
+  text: string;
+};
+
 type StartWorkerOptions = {
   processor?: IngressJobProcessor;
   registerSignalHandlers?: boolean;
   dlqQueue?: IngressDlqQueue;
 };
 
-const defaultProcessor: IngressJobProcessor = async (job: IngressJobPayload) => {
-  logger.info(
-    {
-      event: 'worker.job.processed',
-      eventKey: job.eventKey,
-      schemaVersion: job.schemaVersion,
-      traceId: job.traceContext?.traceId,
-      correlationId: job.traceContext?.correlationId,
-    },
-    'worker.job.processed',
-  );
+export const extractOutboundMessageFromIngressPayload = (
+  payload: unknown,
+): OutboundMessage | null => {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const entries = Array.isArray(payload.entry) ? payload.entry : [];
+  for (const entry of entries) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const changes = Array.isArray(entry.changes) ? entry.changes : [];
+    for (const change of changes) {
+      if (!isRecord(change)) {
+        continue;
+      }
+
+      const value = isRecord(change.value) ? change.value : null;
+      if (!value) {
+        continue;
+      }
+
+      const messages = Array.isArray(value.messages) ? value.messages : [];
+      for (const message of messages) {
+        if (!isRecord(message)) {
+          continue;
+        }
+
+        const to = typeof message.from === 'string' ? message.from.trim() : '';
+        const textNode = isRecord(message.text) ? message.text : null;
+        const text = textNode && typeof textNode.body === 'string' ? textNode.body.trim() : '';
+
+        if (to && text) {
+          return { to, text };
+        }
+      }
+    }
+  }
+
+  return null;
 };
+
+export const buildAutoReplyText = (inboundText: string) =>
+  `Terima kasih, pesan kamu sudah kami terima: ${inboundText}`;
+
+export const sendWhatsAppTextMessage = async (
+  input: {
+    phoneNumberId: string;
+    accessToken: string;
+    to: string;
+    text: string;
+  },
+  fetchImpl: FetchLike,
+) => {
+  const endpoint = `https://graph.facebook.com/v22.0/${input.phoneNumberId}/messages`;
+  const response = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: input.to,
+      type: 'text',
+      text: {
+        body: input.text,
+      },
+    }),
+  });
+
+  if (response.ok) {
+    return;
+  }
+
+  const responseBody = await response.text();
+  const message = `WhatsApp outbound failed with status ${response.status}: ${responseBody}`;
+
+  if (response.status >= 400 && response.status < 500) {
+    throw new WorkerPermanentError(message);
+  }
+
+  throw new Error(message);
+};
+
+export const createDefaultProcessor =
+  (
+    env: {
+      WHATSAPP_PHONE_NUMBER_ID: string;
+      WHATSAPP_ACCESS_TOKEN: string;
+    },
+    fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
+  ): IngressJobProcessor =>
+  async (job: IngressJobPayload) => {
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('Global fetch is not available in this runtime');
+    }
+
+    const outboundMessage = extractOutboundMessageFromIngressPayload(job.payload);
+
+    logger.info(
+      {
+        event: 'worker.job.processed',
+        eventKey: job.eventKey,
+        schemaVersion: job.schemaVersion,
+        traceId: job.traceContext?.traceId,
+        correlationId: job.traceContext?.correlationId,
+      },
+      'worker.job.processed',
+    );
+
+    if (!outboundMessage) {
+      logger.info(
+        {
+          event: 'worker.outbound.skipped',
+          eventKey: job.eventKey,
+          reason: 'no_inbound_text_message',
+          traceId: job.traceContext?.traceId,
+          correlationId: job.traceContext?.correlationId,
+        },
+        'worker.outbound.skipped',
+      );
+      return;
+    }
+
+    const outboundText = buildAutoReplyText(outboundMessage.text);
+
+    await sendWhatsAppTextMessage(
+      {
+        phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
+        accessToken: env.WHATSAPP_ACCESS_TOKEN,
+        to: outboundMessage.to,
+        text: outboundText,
+      },
+      fetchImpl,
+    );
+
+    logger.info(
+      {
+        event: 'worker.outbound.sent',
+        eventKey: job.eventKey,
+        to: outboundMessage.to,
+        traceId: job.traceContext?.traceId,
+        correlationId: job.traceContext?.correlationId,
+      },
+      'worker.outbound.sent',
+    );
+  };
 
 export const startWorker = (
   runtimeEnv: NodeJS.ProcessEnv,
@@ -356,7 +515,12 @@ export const startWorker = (
 ): WorkerService => {
   const env = validateEnv(runtimeEnv);
   const policies = resolveWorkerPolicies(env);
-  const processor = options.processor ?? defaultProcessor;
+  const processor =
+    options.processor ??
+    createDefaultProcessor({
+      WHATSAPP_PHONE_NUMBER_ID: env.WHATSAPP_PHONE_NUMBER_ID,
+      WHATSAPP_ACCESS_TOKEN: env.WHATSAPP_ACCESS_TOKEN,
+    });
   const dlqQueue = options.dlqQueue ?? createBullMqIngressDlqQueue(env.REDIS_URL);
   const worker = createIngressQueueWorker({
     redisUrl: env.REDIS_URL,

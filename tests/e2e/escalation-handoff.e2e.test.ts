@@ -44,11 +44,14 @@ async function withServer<T>(
 ): Promise<T> {
   const env: NodeJS.ProcessEnv = {
     NODE_ENV: 'test',
+    ALLOW_INSECURE_HTTP: 'true',
     PORT: '0',
     WHATSAPP_VERIFY_TOKEN: 'verify-token-e2e',
     WHATSAPP_APP_SECRET: 'secret-e2e',
     WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
     WHATSAPP_ACCESS_TOKEN: 'token-e2e',
+    OPENAI_API_KEY: 'openai-key-e2e',
+    GEMINI_API_KEY: 'gemini-key-e2e',
     REDIS_URL: 'redis://localhost:6379',
     SUPABASE_URL: 'https://mock.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'mock-key',
@@ -111,105 +114,109 @@ async function withServer<T>(
 
 console.log(`${color.cyan}E2E: Escalation Handoff (L2 – E2E)${color.reset}\n`);
 
-await runTest('Escalation-triggering message is enqueued correctly', async () => {
-  await withServer(async (baseUrl, enqueuedJobs) => {
-    const escalationPayload = JSON.stringify({
-      object: 'whatsapp_business_account',
-      entry: [
-        {
-          changes: [
-            {
-              value: {
-                messages: [
-                  {
-                    id: 'wamid-escalation-001',
-                    type: 'text',
-                    text: { body: 'I need to talk to a human agent right now' },
-                  },
-                ],
+const main = async () => {
+  await runTest('Escalation-triggering message is enqueued correctly', async () => {
+    await withServer(async (baseUrl, enqueuedJobs) => {
+      const escalationPayload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    {
+                      id: 'wamid-escalation-001',
+                      type: 'text',
+                      text: { body: 'I need to talk to a human agent right now' },
+                    },
+                  ],
+                },
               },
-            },
-          ],
+            ],
+          },
+        ],
+      });
+
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hub-Signature-256': signBody(escalationPayload, 'secret-e2e'),
         },
-      ],
-    });
+        body: escalationPayload,
+      });
 
-    const res = await fetch(`${baseUrl}/webhook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hub-Signature-256': signBody(escalationPayload, 'secret-e2e'),
-      },
-      body: escalationPayload,
+      assert.equal(res.status, 200);
+      assert.equal(enqueuedJobs.length, 1);
     });
-
-    assert.equal(res.status, 200);
-    assert.equal(enqueuedJobs.length, 1);
   });
-});
 
-await runTest('Worker processor routes escalation-triggering payload correctly', async () => {
-  await withServer(async (baseUrl, enqueuedJobs) => {
-    const escalationPayload = JSON.stringify({
-      object: 'whatsapp_business_account',
-      entry: [
-        {
-          changes: [
-            {
-              value: {
-                messages: [
-                  {
-                    id: 'wamid-escalation-002',
-                    type: 'text',
-                    text: { body: 'i want to talk to a manager' },
-                  },
-                ],
+  await runTest('Worker processor routes escalation-triggering payload correctly', async () => {
+    await withServer(async (baseUrl, enqueuedJobs) => {
+      const escalationPayload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    {
+                      id: 'wamid-escalation-002',
+                      type: 'text',
+                      text: { body: 'i want to talk to a manager' },
+                    },
+                  ],
+                },
               },
-            },
-          ],
+            ],
+          },
+        ],
+      });
+
+      await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hub-Signature-256': signBody(escalationPayload, 'secret-e2e'),
         },
-      ],
+        body: escalationPayload,
+      });
+
+      const jobData = enqueuedJobs[0];
+      assert.ok(jobData, 'Job must be present');
+
+      const routedToEscalation: boolean[] = [];
+
+      await runIngressJob({
+        jobName: INGRESS_JOB_NAME,
+        jobData,
+        policies: {
+          concurrency: 1,
+          jobTimeoutMs: 5000,
+          retry: { transientMaxAttempts: 3, permanentMaxAttempts: 1 },
+        },
+        processor: async (ingressPayload) => {
+          const payloadStr = JSON.stringify(ingressPayload.payload);
+          const isEscalation =
+            payloadStr.includes('manager') ||
+            payloadStr.includes('human') ||
+            payloadStr.includes('agent');
+          routedToEscalation.push(isEscalation);
+        },
+      });
+
+      assert.equal(routedToEscalation[0], true, 'Processor should detect escalation intent');
     });
-
-    await fetch(`${baseUrl}/webhook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hub-Signature-256': signBody(escalationPayload, 'secret-e2e'),
-      },
-      body: escalationPayload,
-    });
-
-    const jobData = enqueuedJobs[0];
-    assert.ok(jobData, 'Job must be present');
-
-    const routedToEscalation: boolean[] = [];
-
-    await runIngressJob({
-      jobName: INGRESS_JOB_NAME,
-      jobData,
-      policies: {
-        concurrency: 1,
-        jobTimeoutMs: 5000,
-        retry: { transientMaxAttempts: 3, permanentMaxAttempts: 1 },
-      },
-      processor: async (ingressPayload) => {
-        const payloadStr = JSON.stringify(ingressPayload.payload);
-        const isEscalation =
-          payloadStr.includes('manager') ||
-          payloadStr.includes('human') ||
-          payloadStr.includes('agent');
-        routedToEscalation.push(isEscalation);
-      },
-    });
-
-    assert.equal(routedToEscalation[0], true, 'Processor should detect escalation intent');
   });
-});
 
-if (failed > 0) {
-  console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
-  process.exit(1);
-} else {
-  console.log(`\n${color.green}All escalation handoff E2E tests passed.${color.reset}`);
-}
+  if (failed > 0) {
+    console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
+    process.exit(1);
+  } else {
+    console.log(`\n${color.green}All escalation handoff E2E tests passed.${color.reset}`);
+  }
+};
+
+void main();
