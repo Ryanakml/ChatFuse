@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "noEmit": false,
     "module": "nodenext",
     "target": "esnext",
     "types": ["node"],
