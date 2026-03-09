@@ -11,7 +11,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "node --import tsx tests/e2e/webhook-to-outbound.e2e.test.ts && node --import tsx tests/e2e/duplicate-replay.e2e.test.ts && node --import tsx tests/e2e/escalation-handoff.e2e.test.ts",
     "test:load": "node --import tsx tests/load/load-test.ts",
-    "build": "npm run build --workspaces",
+    "build": "npm run build -w packages/config -w packages/shared -w packages/llm && npm run build -w apps/api -w apps/worker",
     "dev:api": "npm --workspace apps/api run dev",
     "dev:dashboard": "npm --workspace apps/dashboard run dev",
     "dev": "npm run dev:api & npm run dev:dashboard",
