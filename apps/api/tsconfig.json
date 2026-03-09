@@ -25,6 +25,7 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
+    "composite": true,
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
