@@ -11,10 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build @wa-chat/shared first because dist/ is gitignored.
-  # All jobs that import from it must download the artifact before running.
+  # Build internal packages first because their dist/ folders are gitignored.
+  # @wa-chat/config and @wa-chat/shared must both exist before lint/typecheck/test/build.
   prepare:
-    name: Build shared package
+    name: Build internal packages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,14 +29,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build @wa-chat/shared
-        run: npm run build --workspace packages/shared
+      - name: Build @wa-chat/config
+        run: npm run build -w @wa-chat/config
 
-      - name: Upload shared dist
+      - name: Build @wa-chat/shared
+        run: npm run build -w @wa-chat/shared
+
+      - name: Upload internal package dists
         uses: actions/upload-artifact@v4
         with:
-          name: shared-dist
-          path: packages/shared/dist/
+          name: internal-dists
+          path: |
+            packages/config/dist/
+            packages/shared/dist/
           retention-days: 1
 
   lint:
@@ -56,11 +61,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download shared dist
+      - name: Download internal package dists
         uses: actions/download-artifact@v4
         with:
-          name: shared-dist
-          path: packages/shared/dist/
+          name: internal-dists
 
       - name: Run lint
         run: npm run lint
@@ -82,11 +86,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download shared dist
+      - name: Download internal package dists
         uses: actions/download-artifact@v4
         with:
-          name: shared-dist
-          path: packages/shared/dist/
+          name: internal-dists
 
       - name: Run typecheck
         run: npm run typecheck
@@ -108,11 +111,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download shared dist
+      - name: Download internal package dists
         uses: actions/download-artifact@v4
         with:
-          name: shared-dist
-          path: packages/shared/dist/
+          name: internal-dists
 
       - name: Run tests
         run: npm run test
@@ -152,11 +154,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download shared dist
+      - name: Download internal package dists
         uses: actions/download-artifact@v4
         with:
-          name: shared-dist
-          path: packages/shared/dist/
+          name: internal-dists
 
       - name: Build all workspaces
         run: npm run build
