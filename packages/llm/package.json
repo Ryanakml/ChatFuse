@@ -12,7 +12,7 @@
     "test:eval": "tsx src/evals/runner.ts"
   },
   "dependencies": {
-    "@wa-chat/shared": "^0.0.1",
+    "@wa-chat/shared": "*",
     "@langchain/community": "^1.1.22",
     "@langchain/core": "^1.1.31",
     "@langchain/google-genai": "^2.1.24",
