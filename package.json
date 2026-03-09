@@ -9,6 +9,8 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "node --import tsx tests/e2e/webhook-to-outbound.e2e.test.ts && node --import tsx tests/e2e/duplicate-replay.e2e.test.ts && node --import tsx tests/e2e/escalation-handoff.e2e.test.ts",
+    "test:load": "node --import tsx tests/load/load-test.ts",
     "build": "npm run build --workspaces",
     "dev:api": "npm --workspace apps/api run dev",
     "dev:dashboard": "npm --workspace apps/dashboard run dev",

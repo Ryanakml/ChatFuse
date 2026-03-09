@@ -1,0 +1,167 @@
+name: CI — PR Gates
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build internal packages first because their dist/ folders are gitignored.
+  # @wa-chat/config and @wa-chat/shared must both exist before lint/typecheck/test/build.
+  prepare:
+    name: Build internal packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build @wa-chat/config
+        run: npm run build -w @wa-chat/config
+
+      - name: Build @wa-chat/shared
+        run: npm run build -w @wa-chat/shared
+
+      - name: Upload internal package dists
+        uses: actions/upload-artifact@v4
+        with:
+          name: internal-dists
+          path: |
+            packages/config/dist/
+            packages/shared/dist/
+          retention-days: 1
+
+  lint:
+    name: Lint
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download internal package dists
+        uses: actions/download-artifact@v4
+        with:
+          name: internal-dists
+          path: .
+
+      - name: Run lint
+        run: npm run lint
+
+  typecheck:
+    name: Type Check
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download internal package dists
+        uses: actions/download-artifact@v4
+        with:
+          name: internal-dists
+          path: .
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+  test:
+    name: Unit & Integration Tests
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download internal package dists
+        uses: actions/download-artifact@v4
+        with:
+          name: internal-dists
+          path: .
+
+      - name: Run tests
+        run: npm run test
+        env:
+          NODE_ENV: test
+          # Integration tests may need these; they should be set as repo secrets
+          # for branches that need real service connectivity.
+          # Unit tests run without any env vars.
+          SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL || '' }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY || '' }}
+          REDIS_URL: ${{ secrets.TEST_REDIS_URL || '' }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/coverage/
+            **/test-results/
+          retention-days: 7
+
+  build:
+    name: Build
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download internal package dists
+        uses: actions/download-artifact@v4
+        with:
+          name: internal-dists
+          path: .
+
+      - name: Build all workspaces
+        run: npm run build

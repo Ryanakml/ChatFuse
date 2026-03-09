@@ -1,0 +1,24 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "esnext",
+    "types": ["node"],
+    "baseUrl": "..",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": {
+      "@wa-chat/shared": ["packages/shared/src/index.ts"],
+      "@wa-chat/config": ["packages/config/src/index.ts"]
+    }
+  },
+  "include": ["e2e/**/*.ts", "load/**/*.ts"],
+  "references": [
+    { "path": "../apps/api" },
+    { "path": "../apps/worker" },
+    { "path": "../packages/shared" },
+    { "path": "../packages/llm" }
+  ]
+}

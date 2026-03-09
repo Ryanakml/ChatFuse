@@ -1,7 +1,7 @@
 -- Migration: Add fields to conversations for Escalation Workflow (J3)
 
 -- 1. Create enum for escalation status
-CREATE TYPE public.escalation_status A S ENUM ('open', 'pending', 'resolved');
+CREATE TYPE public.escalation_status AS ENUM ('open', 'pending', 'resolved');
 
 -- 2. Add assignment, escalation status, and SLA to conversations
 ALTER TABLE public.conversations

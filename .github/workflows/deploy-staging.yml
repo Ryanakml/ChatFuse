@@ -1,0 +1,250 @@
+name: Deploy — Staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual staging deploy'
+        required: false
+        default: 'manual trigger'
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false # Never cancel an in-progress staging deploy
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: Build artefacts
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      sha_short: ${{ steps.meta.outputs.sha_short }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set short SHA
+        id: meta
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all workspaces
+        run: npm run build
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ steps.meta.outputs.sha_short }}
+          path: |
+            apps/api/dist/
+            apps/worker/dist/
+            apps/dashboard/.next/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Deploy to staging
+  # NOTE: Replace the deploy steps below with your actual hosting
+  #       provider commands (e.g. railway up, fly deploy, render
+  #       deploy-hook, etc.)
+  # ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: staging
+      url: ${{ secrets.STAGING_API_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download build artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ needs.build.outputs.sha_short }}
+
+      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
+      - name: Deploy API to staging
+        run: |
+          echo "[PLACEHOLDER] Deploying API service to staging..."
+          echo "Replace this step with your hosting provider deploy command."
+          echo "Example (Railway): railway up --service api --detach"
+          echo "Example (Fly.io): fly deploy --app wa-chat-api-staging --remote-only"
+          echo "Example (Render): curl -X POST '${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}'"
+        env:
+          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          STAGING_REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
+          STAGING_OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
+          STAGING_GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
+          STAGING_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_NUMBER_ID }}
+          STAGING_WHATSAPP_ACCESS_TOKEN: ${{ secrets.STAGING_WHATSAPP_ACCESS_TOKEN }}
+          STAGING_WHATSAPP_APP_SECRET: ${{ secrets.STAGING_WHATSAPP_APP_SECRET }}
+          STAGING_WHATSAPP_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_VERIFY_TOKEN }}
+
+      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
+      - name: Deploy Worker to staging
+        run: |
+          echo "[PLACEHOLDER] Deploying Worker service to staging..."
+          echo "Replace this step with your hosting provider deploy command."
+
+      - name: Wait for staging to become healthy
+        run: |
+          echo "Waiting 30s for staging services to stabilize..."
+          sleep 30
+          RETRIES=10
+          for i in $(seq 1 $RETRIES); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.STAGING_API_URL }}/health")
+            if [ "$STATUS" = "200" ]; then
+              echo "Staging is healthy (attempt $i)."
+              exit 0
+            fi
+            echo "Attempt $i: staging returned HTTP $STATUS. Retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: Staging did not become healthy after $RETRIES attempts."
+          exit 1
+        env:
+          STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 3: Smoke tests (health + webhook challenge)
+  # ─────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make smoke-test script executable
+        run: chmod +x scripts/smoke-test.sh
+
+      - name: Run smoke tests
+        run: ./scripts/smoke-test.sh
+        env:
+          API_URL: ${{ secrets.STAGING_API_URL }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_VERIFY_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 4: E2E suite against staging
+  # ─────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: smoke-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run E2E suite against staging
+        run: npm run test:e2e
+        env:
+          NODE_ENV: staging
+          API_URL: ${{ secrets.STAGING_API_URL }}
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_VERIFY_TOKEN }}
+          WHATSAPP_APP_SECRET: ${{ secrets.STAGING_WHATSAPP_APP_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
+
+      - name: Upload E2E results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-staging-${{ github.run_id }}
+          path: |
+            **/e2e-results/
+            **/test-results/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 5: Observability checks
+  # ─────────────────────────────────────────────────────────────
+  observability-check:
+    name: Observability Checks
+    runs-on: ubuntu-latest
+    needs: smoke-test
+    steps:
+      - name: Check OTEL collector health
+        run: |
+          OTEL_URL="${{ secrets.STAGING_OTEL_COLLECTOR_URL }}"
+          if [ -z "$OTEL_URL" ]; then
+            echo "STAGING_OTEL_COLLECTOR_URL is not set; skipping OTEL check."
+            exit 0
+          fi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$OTEL_URL/-/healthy" || echo "000")
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ]; then
+            echo "OTEL collector is healthy (HTTP $STATUS)."
+          else
+            echo "WARNING: OTEL collector returned HTTP $STATUS. Check your collector."
+            # Fail softly — alert but don't block staging gate for collector issues.
+          fi
+
+      - name: Verify /metrics endpoint is reachable
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.STAGING_API_URL }}/metrics")
+          if [ "$STATUS" = "200" ]; then
+            echo "/metrics endpoint reachable (HTTP 200)."
+          else
+            echo "WARNING: /metrics returned HTTP $STATUS."
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 6: Summary — staging gate status
+  # ─────────────────────────────────────────────────────────────
+  staging-gate:
+    name: Staging Gate (Summary)
+    runs-on: ubuntu-latest
+    needs: [smoke-test, e2e, observability-check]
+    if: always()
+    steps:
+      - name: Check all gate results
+        run: |
+          SMOKE="${{ needs.smoke-test.result }}"
+          E2E="${{ needs.e2e.result }}"
+          OBS="${{ needs.observability-check.result }}"
+
+          echo "Smoke Test: $SMOKE"
+          echo "E2E:        $E2E"
+          echo "Observability: $OBS"
+
+          if [ "$SMOKE" != "success" ] || [ "$E2E" != "success" ]; then
+            echo "STAGING GATE FAILED. Production deploy is blocked."
+            exit 1
+          fi
+
+          echo "STAGING GATE PASSED. Production deploy is available."

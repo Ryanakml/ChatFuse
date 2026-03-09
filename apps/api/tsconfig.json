@@ -25,6 +25,7 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
+    "composite": true,
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
@@ -46,5 +47,6 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true
-  }
+  },
+  "include": ["src", "../../packages/shared/src/**/*", "../../packages/config/src/**/*"]
 }

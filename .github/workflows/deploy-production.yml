@@ -1,0 +1,258 @@
+name: Deploy — Production
+
+# ─────────────────────────────────────────────────────────────────────────────
+# This workflow is MANUAL ONLY (workflow_dispatch).
+# It requires review from the "production" GitHub environment before proceeding.
+#
+# Prerequisites:
+#   1. Create a GitHub Environment named "production" (Repo → Settings →
+#      Environments → New environment → name: production).
+#   2. Enable "Required reviewers" and add yourself (or your team).
+#   3. Set "Deployment branches" limited to: main
+#
+# The workflow will pause at the "deploy-canary" job until an approver
+# clicks "Review deployments" → "Approve and deploy" in the Actions UI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Git SHA to deploy (leave blank for latest main)'
+        required: false
+        default: ''
+      canary_soak_seconds:
+        description: 'Canary soak period in seconds (default: 300)'
+        required: false
+        default: '300'
+      skip_canary:
+        description: 'Skip canary and deploy directly to 100% (emergency hotfix only)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # Never cancel production deploys
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: Resolve the SHA and validate staging gate passed
+  # ─────────────────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_sha: ${{ steps.resolve.outputs.deploy_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.sha || github.ref }}
+
+      - name: Resolve deploy SHA
+        id: resolve
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "deploy_sha=$SHA" >> $GITHUB_OUTPUT
+          echo "Deploying SHA: $SHA"
+
+      - name: Verify staging API is healthy (pre-deploy)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.STAGING_API_URL }}/health")
+          if [ "$STATUS" != "200" ]; then
+            echo "ERROR: Staging is not healthy (HTTP $STATUS). Aborting production deploy."
+            echo "Fix staging before promoting to production."
+            exit 1
+          fi
+          echo "Staging health check passed (HTTP $STATUS)."
+        env:
+          STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Manual approval gate (pauses here until approved)
+  # This job runs in the "production" environment which has
+  # required reviewers configured via GitHub UI.
+  # ─────────────────────────────────────────────────────────────
+  approval-gate:
+    name: Manual Approval
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment:
+      name: production
+      url: ${{ secrets.PROD_API_URL }}
+    steps:
+      - name: Approval received
+        run: |
+          echo "Production deployment approved."
+          echo "SHA: ${{ needs.preflight.outputs.deploy_sha }}"
+          echo "Canary soak: ${{ github.event.inputs.canary_soak_seconds }}s"
+          echo "Skip canary: ${{ github.event.inputs.skip_canary }}"
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 3: Deploy canary slice
+  # NOTE: Replace placeholder steps with your hosting provider.
+  #
+  # Canary strategy: deploy the new version, then validate it
+  # before promoting or rolling back.
+  # For providers without built-in canary (e.g. Render, Railway):
+  #   - Deploy to a separate "canary" service instance
+  #   - Route a small fraction of traffic manually (or via load balancer)
+  # ─────────────────────────────────────────────────────────────
+  deploy-canary:
+    name: Deploy Canary
+    runs-on: ubuntu-latest
+    needs: approval-gate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
+      - name: Deploy canary API
+        run: |
+          echo "[PLACEHOLDER] Deploying canary slice to production..."
+          echo "Replace with your provider's canary deploy command."
+          echo "Example (Fly.io): fly deploy --app wa-chat-api-prod --strategy canary"
+          echo "Example (k8s/Helm): helm upgrade --set image.tag=$SHA --set replicaCount.canary=1"
+          echo "Example (no-native-canary): Deploy to a separate 'api-canary' service; route 10% traffic via load balancer."
+        env:
+          SHA: ${{ needs.preflight.outputs.deploy_sha }}
+          PROD_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          PROD_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}
+          PROD_REDIS_URL: ${{ secrets.PROD_REDIS_URL }}
+          PROD_OPENAI_API_KEY: ${{ secrets.PROD_OPENAI_API_KEY }}
+          PROD_GEMINI_API_KEY: ${{ secrets.PROD_GEMINI_API_KEY }}
+          PROD_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.PROD_WHATSAPP_PHONE_NUMBER_ID }}
+          PROD_WHATSAPP_ACCESS_TOKEN: ${{ secrets.PROD_WHATSAPP_ACCESS_TOKEN }}
+          PROD_WHATSAPP_APP_SECRET: ${{ secrets.PROD_WHATSAPP_APP_SECRET }}
+          PROD_WHATSAPP_VERIFY_TOKEN: ${{ secrets.PROD_WHATSAPP_VERIFY_TOKEN }}
+
+      - name: Wait for canary to become healthy
+        run: |
+          CANARY_URL="${{ secrets.PROD_CANARY_API_URL || secrets.PROD_API_URL }}"
+          echo "Waiting 15s for canary to stabilize..."
+          sleep 15
+          RETRIES=6
+          for i in $(seq 1 $RETRIES); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$CANARY_URL/health")
+            if [ "$STATUS" = "200" ]; then
+              echo "Canary is healthy (attempt $i)."
+              exit 0
+            fi
+            echo "Attempt $i: canary returned HTTP $STATUS. Retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: Canary did not become healthy."
+          exit 1
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 4: Canary validation — soak + automated threshold check
+  # ─────────────────────────────────────────────────────────────
+  canary-validation:
+    name: Canary Validation
+    runs-on: ubuntu-latest
+    needs: deploy-canary
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make canary-validate script executable
+        run: chmod +x scripts/canary-validate.sh
+
+      - name: Run canary validation
+        run: ./scripts/canary-validate.sh
+        env:
+          API_URL: ${{ secrets.PROD_CANARY_API_URL || secrets.PROD_API_URL }}
+          SOAK_SECONDS: ${{ github.event.inputs.canary_soak_seconds }}
+          SKIP_CANARY: ${{ github.event.inputs.skip_canary }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 5: Promote to 100% production (runs only if canary passes)
+  # ─────────────────────────────────────────────────────────────
+  promote:
+    name: Promote to 100%
+    runs-on: ubuntu-latest
+    needs: canary-validation
+    if: success()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+
+      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
+      - name: Promote canary to full production
+        run: |
+          echo "[PLACEHOLDER] Promoting canary to 100% production traffic."
+          echo "Example (Fly.io): fly deploy --app wa-chat-api-prod --strategy immediate"
+          echo "Example (Render): Update the non-canary service to the new image."
+          echo "Example (k8s): helm upgrade --set image.tag=$SHA --set replicaCount.canary=0 --set replicaCount.stable=N"
+        env:
+          SHA: ${{ needs.preflight.outputs.deploy_sha }}
+
+      - name: Verify production health post-promote
+        run: |
+          echo "Waiting 15s post-promote..."
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PROD_API_URL }}/health")
+          if [ "$STATUS" = "200" ]; then
+            echo "Production is healthy post-promote (HTTP $STATUS). Deploy complete."
+          else
+            echo "WARNING: Production health check returned HTTP $STATUS after promote."
+            exit 1
+          fi
+
+      - name: Record successful deployment
+        run: |
+          echo "PRODUCTION DEPLOY SUCCESSFUL"
+          echo "SHA: ${{ needs.preflight.outputs.deploy_sha }}"
+          echo "Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 6: Automated rollback (runs ONLY if canary-validation fails)
+  # ─────────────────────────────────────────────────────────────
+  rollback:
+    name: Automated Rollback
+    runs-on: ubuntu-latest
+    needs: canary-validation
+    if: failure()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
+      - name: Rollback canary to previous stable version
+        run: |
+          echo "[PLACEHOLDER] ROLLING BACK — canary validation failed."
+          echo "Remove the canary deployment and restore previous stable."
+          echo "Example (Fly.io): fly releases list --app wa-chat-api-prod | head -3"
+          echo "  then: fly releases rollback --app wa-chat-api-prod"
+          echo "Example (Render): Re-deploy previous image via Render API."
+          echo "Example (k8s): helm rollback wa-chat 0"
+
+      - name: Send failure notification
+        run: |
+          echo "PRODUCTION DEPLOY FAILED AND ROLLED BACK."
+          echo "SHA: ${{ needs.preflight.outputs.deploy_sha }}"
+          echo "Canary validation did not pass. No production traffic was affected."
+          echo "Check canary-validation job logs for the failure reason."
+          # Replace with actual notification (e.g., Slack webhook):
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"🚨 Production deploy FAILED and rolled back for SHA ${{ needs.preflight.outputs.deploy_sha }}"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Fail the workflow explicitly
+        run: exit 1
