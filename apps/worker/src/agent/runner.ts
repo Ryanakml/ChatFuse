@@ -15,7 +15,39 @@ export type AgentRunnerResult = {
 const hasProviderCredential = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim() !== '';
 
+const resolveEnvKey = (
+  primary: string | undefined,
+  fallback: string | undefined,
+): string | undefined => {
+  if (hasProviderCredential(primary)) {
+    return primary;
+  }
+
+  if (hasProviderCredential(fallback)) {
+    return fallback;
+  }
+
+  return undefined;
+};
+
 export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRunnerResult> => {
+  const resolvedOpenAiKey = resolveEnvKey(
+    process.env.OPENAI_API_KEY,
+    process.env.STAGING_OPENAI_API_KEY,
+  );
+  const resolvedGeminiKey = resolveEnvKey(
+    process.env.GEMINI_API_KEY,
+    process.env.STAGING_GEMINI_API_KEY,
+  );
+
+  if (resolvedOpenAiKey) {
+    process.env.OPENAI_API_KEY = resolvedOpenAiKey;
+  }
+
+  if (resolvedGeminiKey) {
+    process.env.GEMINI_API_KEY = resolvedGeminiKey;
+  }
+
   const hasOpenAiKey = hasProviderCredential(process.env.OPENAI_API_KEY);
   const hasGeminiKey = hasProviderCredential(process.env.GEMINI_API_KEY);
 
