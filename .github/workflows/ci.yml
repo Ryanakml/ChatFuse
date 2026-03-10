@@ -35,6 +35,9 @@ jobs:
       - name: Build @wa-chat/shared
         run: npm run build -w @wa-chat/shared
 
+      - name: Build @wa-chat/llm
+        run: npm run build -w @wa-chat/llm
+
       - name: Upload internal package dists
         uses: actions/upload-artifact@v4
         with:
@@ -42,6 +45,7 @@ jobs:
           path: |
             packages/config/dist/
             packages/shared/dist/
+            packages/llm/dist/
           retention-days: 1
 
   lint:
@@ -123,6 +127,8 @@ jobs:
         run: npm run test
         env:
           NODE_ENV: test
+          OPENAI_API_KEY: test-key
+          GEMINI_API_KEY: test-key
           # Integration tests may need these; they should be set as repo secrets
           # for branches that need real service connectivity.
           # Unit tests run without any env vars.
@@ -134,6 +140,8 @@ jobs:
         run: npm run test:e2e
         env:
           NODE_ENV: test
+          OPENAI_API_KEY: test-key
+          GEMINI_API_KEY: test-key
 
       - name: Upload test results
         if: always()
