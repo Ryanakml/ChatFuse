@@ -129,7 +129,12 @@ try {
     };
 
     const outbound = extractOutboundMessageFromIngressPayload(payload);
-    assert.deepEqual(outbound, { to: '6281234567890', text: 'halo bot' });
+    assert.deepEqual(outbound, {
+      messageId: 'wamid-outbound-001',
+      sender: '6281234567890',
+      to: '6281234567890',
+      text: 'halo bot',
+    });
   });
 
   await runTest('createDefaultProcessor sends outbound WhatsApp text via Graph API', async () => {
@@ -138,50 +143,61 @@ try {
     let calledAuth = '';
     let calledBody = '';
 
-    const processor = createDefaultProcessor(
-      {
-        WHATSAPP_PHONE_NUMBER_ID: 'phone-id-test',
-        WHATSAPP_ACCESS_TOKEN: 'token-test',
-      },
-      async (input, init) => {
-        calledUrl = input;
-        calledMethod = init.method;
-        calledAuth = init.headers.Authorization ?? '';
-        calledBody = init.body;
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = 'test-openai-key';
 
-        return {
-          ok: true,
-          status: 200,
-          text: async () => '{"messages":[{"id":"wamid.outbound.001"}]}',
-        };
-      },
-    );
-
-    await processor(
-      createIngressJobPayload({
-        eventKey: 'message:wamid-outbound-processor-001',
-        payload: {
-          object: 'whatsapp_business_account',
-          entry: [
-            {
-              changes: [
-                {
-                  value: {
-                    messages: [
-                      {
-                        id: 'wamid-inbound-processor-001',
-                        from: '6289876543210',
-                        text: { body: 'test outbound' },
-                      },
-                    ],
-                  },
-                },
-              ],
-            },
-          ],
+    try {
+      const processor = createDefaultProcessor(
+        {
+          WHATSAPP_PHONE_NUMBER_ID: 'phone-id-test',
+          WHATSAPP_ACCESS_TOKEN: 'token-test',
         },
-      }),
-    );
+        async (input, init) => {
+          calledUrl = input;
+          calledMethod = init.method;
+          calledAuth = init.headers.Authorization ?? '';
+          calledBody = init.body;
+
+          return {
+            ok: true,
+            status: 200,
+            text: async () => '{"messages":[{"id":"wamid.outbound.001"}]}',
+          };
+        },
+      );
+
+      await processor(
+        createIngressJobPayload({
+          eventKey: 'message:wamid-outbound-processor-001',
+          payload: {
+            object: 'whatsapp_business_account',
+            entry: [
+              {
+                changes: [
+                  {
+                    value: {
+                      messages: [
+                        {
+                          id: 'wamid-inbound-processor-001',
+                          from: '6289876543210',
+                          text: { body: 'test outbound' },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+    } finally {
+      if (previousOpenAiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = previousOpenAiKey;
+      }
+    }
 
     assert.equal(calledUrl, 'https://graph.facebook.com/v22.0/phone-id-test/messages');
     assert.equal(calledMethod, 'POST');

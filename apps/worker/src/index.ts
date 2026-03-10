@@ -30,6 +30,7 @@ import {
   WorkerPermanentError,
   type WorkerPolicies,
 } from './queue/consumer.js';
+import { runAgentPipeline } from './agent/runner.js';
 
 dotenv.config();
 
@@ -348,6 +349,8 @@ type FetchLike = (
 ) => Promise<FetchResponseLike>;
 
 type OutboundMessage = {
+  messageId: string;
+  sender: string;
   to: string;
   text: string;
 };
@@ -389,11 +392,13 @@ export const extractOutboundMessageFromIngressPayload = (
         }
 
         const to = typeof message.from === 'string' ? message.from.trim() : '';
+        const messageId = typeof message.id === 'string' ? message.id.trim() : '';
+        const sender = to;
         const textNode = isRecord(message.text) ? message.text : null;
         const text = textNode && typeof textNode.body === 'string' ? textNode.body.trim() : '';
 
         if (to && text) {
-          return { to, text };
+          return { messageId, sender, to, text };
         }
       }
     }
@@ -485,7 +490,82 @@ export const createDefaultProcessor =
       return;
     }
 
-    const outboundText = buildAutoReplyText(outboundMessage.text);
+    const pipelineStartTime = Date.now();
+    logger.info(
+      {
+        event: 'agent.pipeline.start',
+        eventKey: job.eventKey,
+        messageId: outboundMessage.messageId || null,
+        sender: outboundMessage.sender,
+        traceId: job.traceContext?.traceId,
+        correlationId: job.traceContext?.correlationId,
+      },
+      'agent.pipeline.start',
+    );
+
+    let outboundText = buildAutoReplyText(outboundMessage.text);
+    let pipelineRoute: 'llm' | 'fallback' = 'fallback';
+    let pipelineMetadata: Record<string, unknown> = { reason: 'default_fallback' };
+
+    try {
+      const result = await runAgentPipeline({
+        message: outboundMessage.text,
+        conversationId: job.eventKey,
+        sender: outboundMessage.sender,
+      });
+
+      pipelineRoute = result.route;
+      pipelineMetadata = result.metadata;
+
+      if (result.text.trim() !== '') {
+        outboundText = result.text;
+      }
+    } catch (error: unknown) {
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      const classifiedError = classifyWorkerError(normalizedError);
+      const isPermanentError = classifiedError.errorClass === 'permanent';
+
+      logger.error(
+        {
+          event: 'agent.pipeline.failure',
+          eventKey: job.eventKey,
+          messageId: outboundMessage.messageId || null,
+          sender: outboundMessage.sender,
+          error: normalizedError.message,
+          errorClass: classifiedError.errorClass,
+          willRetry: !isPermanentError,
+          durationMs: Date.now() - pipelineStartTime,
+          traceId: job.traceContext?.traceId,
+          correlationId: job.traceContext?.correlationId,
+        },
+        'agent.pipeline.failure',
+      );
+
+      if (isPermanentError) {
+        throw normalizedError;
+      }
+
+      pipelineRoute = 'fallback';
+      pipelineMetadata = {
+        reason: 'pipeline_error',
+        errorClass: classifiedError.errorClass,
+      };
+      outboundText = buildAutoReplyText(outboundMessage.text);
+    }
+
+    logger.info(
+      {
+        event: 'agent.pipeline.success',
+        eventKey: job.eventKey,
+        messageId: outboundMessage.messageId || null,
+        route: pipelineRoute,
+        durationMs: Date.now() - pipelineStartTime,
+        metadata: pipelineMetadata,
+        traceId: job.traceContext?.traceId,
+        correlationId: job.traceContext?.correlationId,
+      },
+      'agent.pipeline.success',
+    );
 
     await sendWhatsAppTextMessage(
       {

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@wa-chat/config": "^0.0.1",
+    "@wa-chat/llm": "^0.0.1",
     "@wa-chat/shared": "^0.0.1",
     "bullmq": "^5.58.0",
     "dotenv": "^16.6.1"
