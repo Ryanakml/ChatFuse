@@ -510,7 +510,8 @@ export const createDefaultProcessor =
     try {
       const result = await runAgentPipeline({
         message: outboundMessage.text,
-        conversationId: job.eventKey,
+        // Phase 1 temporary correlation key until persistence-backed conversation IDs are wired.
+        conversationId: outboundMessage.sender,
         sender: outboundMessage.sender,
       });
 

@@ -3,6 +3,7 @@ import { Embeddings } from '@langchain/core/embeddings';
 import { createClient } from '@supabase/supabase-js';
 import type { KnowledgeDocument } from '@wa-chat/shared';
 import { Document } from '@langchain/core/documents';
+import { getEmbeddings } from './embeddings.js';
 
 const supaUrl = process.env.SUPABASE_URL as string;
 const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
@@ -65,29 +66,40 @@ export async function clearDocumentChunks(documentId: string): Promise<void> {
 }
 
 /**
- * Add chunks explicitly with their specific documentId and chunkIndex metadata.
- * using LangChain's vector store addDocuments method.
+ * Add chunks explicitly into knowledge_chunks with required schema columns.
+ * This avoids relying on vector-store metadata mapping for document_id/chunk_index.
  */
 export async function addChunksToVectorStore(
-  vectorStore: SupabaseVectorStore,
+  _vectorStore: SupabaseVectorStore,
   chunks: Document<Record<string, unknown>>[],
   documentId: string,
 ): Promise<void> {
-  // LangChain SupabaseVectorStore allows providing IDs. We can let it auto-gen, but
-  // our schema requires document_id and chunk_index explicitly map.
-  // Let's format the documents to ensure metadata has what we need.
-  const formattedDocs = chunks.map((chunk, index) => {
-    return new Document({
-      pageContent: chunk.pageContent,
-      metadata: {
-        ...chunk.metadata,
-        document_id: documentId,
-        chunk_index: index,
-      },
-    });
+  const embeddings = getEmbeddings();
+  const chunkContents = chunks.map((chunk) => chunk.pageContent);
+  const vectors = await embeddings.embedDocuments(chunkContents);
+
+  const rows = chunks.map((chunk, index) => {
+    const metadata =
+      chunk.metadata && typeof chunk.metadata === 'object'
+        ? chunk.metadata
+        : ({} as Record<string, unknown>);
+
+    return {
+      document_id: documentId,
+      chunk_index: index,
+      content: chunk.pageContent,
+      embedding: vectors[index],
+      metadata,
+    };
   });
 
-  await vectorStore.addDocuments(formattedDocs);
+  const { error } = await supabaseClient
+    .from('knowledge_chunks')
+    .upsert(rows, { onConflict: 'document_id,chunk_index', ignoreDuplicates: false });
+
+  if (error) {
+    throw new Error(`Failed to upsert knowledge chunks: ${error.message}`);
+  }
 }
 
 export interface RetrievalFilters {
