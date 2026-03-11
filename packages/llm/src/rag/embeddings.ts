@@ -42,7 +42,7 @@ export class PrimaryFallbackEmbeddings extends Embeddings {
       dimensions: VECTOR_DIMENSION_TARGET,
     });
     this.fallback = new GoogleGenerativeAIEmbeddings({
-      modelName: 'text-embedding-004',
+      modelName: 'embedding-001',
     });
   }
 
