@@ -12,11 +12,37 @@ export const classificationChain = RunnableLambda.from(async (state: AgentState)
 
   // Basic keyword-based intent for now.
   // In a real implementation, would use an LLM or specific classifier.
-  if (input.includes('order') || input.includes('status') || input.includes('track')) {
+  const toolKeywords = ['pesanan', 'status', 'lacak', 'cek', 'order', 'track'];
+  const ragKeywords = [
+    'bantuan',
+    'bagaimana',
+    'apa',
+    'kenapa',
+    'mengapa',
+    'kebijakan',
+    'return',
+    'help',
+    'how',
+    'what',
+    'why',
+    'policy',
+  ];
+  const escalationKeywords = [
+    'manajer',
+    'manusia',
+    'agen',
+    'cs',
+    'customer service',
+    'manager',
+    'human',
+    'agent',
+  ];
+
+  if (toolKeywords.some((keyword) => input.includes(keyword))) {
     intent = 'TOOL';
-  } else if (input.includes('help') || input.includes('how') || input.includes('what')) {
+  } else if (ragKeywords.some((keyword) => input.includes(keyword))) {
     intent = 'RAG';
-  } else if (input.includes('manager') || input.includes('human') || input.includes('agent')) {
+  } else if (escalationKeywords.some((keyword) => input.includes(keyword))) {
     intent = 'ESCALATION';
   } else {
     intent = 'CLARIFICATION';

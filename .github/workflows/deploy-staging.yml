@@ -2,7 +2,7 @@ name: Deploy — Staging
 
 on:
   push:
-    branches: [main]
+    branches: [phase/release-go-live]
   workflow_dispatch:
     inputs:
       reason:
