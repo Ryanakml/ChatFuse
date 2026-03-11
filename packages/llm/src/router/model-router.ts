@@ -11,7 +11,26 @@ import { appMetrics } from '@wa-chat/shared';
 export interface ModelRouterConfig {
   primaryConfig?: OpenAIConfiguration;
   fallbackConfig?: GeminiConfiguration;
+  primaryProvider?: 'openai' | 'gemini';
 }
+
+const hasValue = (value: string | undefined): boolean =>
+  typeof value === 'string' && value.trim() !== '';
+
+const assertProviderCredentials = (): void => {
+  const hasOpenAi =
+    hasValue(process.env.OPENAI_API_KEY) ||
+    hasValue(process.env.STAGING_OPENAI_API_KEY) ||
+    hasValue(process.env.PROD_OPENAI_API_KEY);
+  const hasGemini =
+    hasValue(process.env.GEMINI_API_KEY) ||
+    hasValue(process.env.STAGING_GEMINI_API_KEY) ||
+    hasValue(process.env.PROD_GEMINI_API_KEY);
+
+  if (!hasOpenAi && !hasGemini) {
+    throw new Error('No LLM provider credentials found');
+  }
+};
 
 /**
  * Creates a model router with OpenAI as the primary model and Gemini as the fallback.
@@ -21,6 +40,8 @@ export interface ModelRouterConfig {
 export function createModelRouter(
   config?: ModelRouterConfig,
 ): RunnableWithFallbacks<unknown, AIMessage> {
+  assertProviderCredentials();
+
   // 1. OpenAI as primary model (configured with its own retry rules)
   const primaryModel = createOpenAIAdapter(config?.primaryConfig);
 
@@ -48,8 +69,14 @@ export function createStructuredModelRouter<T>(
   schema: z.ZodType<T>,
   config?: ModelRouterConfig,
 ): RunnableWithFallbacks<unknown, T> {
-  const primaryModel = createOpenAIAdapter(config?.primaryConfig).withStructuredOutput(schema);
-  const fallbackModel = createGeminiAdapter(config?.fallbackConfig)
+  assertProviderCredentials();
+
+  const primaryProvider = config?.primaryProvider ?? 'openai';
+
+  const openAiStructuredModel = createOpenAIAdapter(config?.primaryConfig).withStructuredOutput(
+    schema,
+  );
+  const geminiStructuredModel = createGeminiAdapter(config?.fallbackConfig)
     .withStructuredOutput(schema)
     .withConfig({
       callbacks: [
@@ -60,6 +87,10 @@ export function createStructuredModelRouter<T>(
         },
       ],
     });
+
+  const primaryModel = primaryProvider === 'gemini' ? geminiStructuredModel : openAiStructuredModel;
+  const fallbackModel =
+    primaryProvider === 'gemini' ? openAiStructuredModel : geminiStructuredModel;
 
   return primaryModel.withFallbacks({
     fallbacks: [fallbackModel],

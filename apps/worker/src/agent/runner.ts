@@ -9,7 +9,19 @@ export type AgentRunnerInput = {
 export type AgentRunnerResult = {
   text: string;
   route: 'llm' | 'fallback';
-  metadata: Record<string, unknown>;
+  metadata: {
+    reason?: string;
+    errorClass?: string;
+    agentRoute: string | null;
+    provider: string | null;
+    intent: string | null;
+    confidence: number | null;
+    toolName: string | null;
+    toolInput: Record<string, unknown> | null;
+    toolOutput: unknown;
+    toolDurationMs: number | null;
+    toolSuccess: boolean | null;
+  };
 };
 
 const hasProviderCredential = (value: string | undefined): boolean =>
@@ -65,6 +77,18 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
     conversationId: input.conversationId,
   });
 
+  const toolExecution = (
+    state as {
+      toolExecution?: {
+        toolName?: string | null;
+        toolInput?: Record<string, unknown> | null;
+        toolOutput?: unknown;
+        toolDurationMs?: number | null;
+        toolSuccess?: boolean | null;
+      };
+    }
+  ).toolExecution;
+
   const finalText =
     typeof state.finalResponse === 'string' && state.finalResponse.trim() !== ''
       ? state.finalResponse.trim()
@@ -76,8 +100,14 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
       route: 'llm',
       metadata: {
         agentRoute: state.route ?? null,
+        provider: null,
         intent: state.intent ?? null,
         confidence: state.confidence ?? null,
+        toolName: toolExecution?.toolName ?? null,
+        toolInput: toolExecution?.toolInput ?? null,
+        toolOutput: toolExecution?.toolOutput ?? null,
+        toolDurationMs: toolExecution?.toolDurationMs ?? null,
+        toolSuccess: toolExecution?.toolSuccess ?? null,
       },
     };
   }
@@ -88,8 +118,14 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
     metadata: {
       reason: 'empty_final_response',
       agentRoute: state.route ?? null,
+      provider: null,
       intent: state.intent ?? null,
       confidence: state.confidence ?? null,
+      toolName: toolExecution?.toolName ?? null,
+      toolInput: toolExecution?.toolInput ?? null,
+      toolOutput: toolExecution?.toolOutput ?? null,
+      toolDurationMs: toolExecution?.toolDurationMs ?? null,
+      toolSuccess: toolExecution?.toolSuccess ?? null,
     },
   };
 };

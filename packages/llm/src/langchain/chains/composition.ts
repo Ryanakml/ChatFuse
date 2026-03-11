@@ -28,6 +28,15 @@ Please provide the best response to the user.`),
 
 // Initialize the model router enforcing the schema with native tool calling
 const modelRouter = createStructuredModelRouter(StructuredOutputSchema);
+const geminiFirstRouter = createStructuredModelRouter(StructuredOutputSchema, {
+  primaryProvider: 'gemini',
+});
+
+const isOpenAiRateLimitError = (error: unknown): boolean => {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /openai|429|rate.?limit|quota|too many requests/.test(message);
+};
 
 /**
  * Step 6: Response composition chain.
@@ -35,9 +44,13 @@ const modelRouter = createStructuredModelRouter(StructuredOutputSchema);
  * Forces machine-readable schema using native tool calling and provides an ultimate safe fallback.
  */
 export const compositionChain = RunnableLambda.from(async (state: AgentState) => {
+  if (state.composedResponse && state.composedResponse.trim() !== '') {
+    return state;
+  }
+
   try {
     // Link the prompt to the structured output router
-    const chain = compositionPrompt.pipe(modelRouter);
+    const primaryChain = compositionPrompt.pipe(modelRouter);
 
     // Format citations to pass to prompt if available
     const citationsText =
@@ -45,13 +58,31 @@ export const compositionChain = RunnableLambda.from(async (state: AgentState) =>
         ? JSON.stringify(state.citations, null, 2)
         : 'No citations available';
 
-    // Invoke the chain, expecting it to return the z.infer<typeof StructuredOutputSchema> type
-    const structuredOutput = await chain.invoke({
+    const chainInput = {
       route: state.route || 'unknown',
       normalizedInput: state.normalizedInput || '',
       retrievedContext: state.retrievedContext || 'No context available',
       citationsText,
-    });
+    };
+
+    // Invoke the chain, expecting it to return the z.infer<typeof StructuredOutputSchema> type
+    let structuredOutput: {
+      content: string;
+      confidence: number;
+      escalate_flag: boolean;
+    };
+
+    try {
+      structuredOutput = await primaryChain.invoke(chainInput);
+    } catch (primaryError) {
+      if (!isOpenAiRateLimitError(primaryError)) {
+        throw primaryError;
+      }
+
+      // Explicit provider retry for rate-limit/quota scenarios.
+      const fallbackChain = compositionPrompt.pipe(geminiFirstRouter);
+      structuredOutput = await fallbackChain.invoke(chainInput);
+    }
 
     return {
       ...state,

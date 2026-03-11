@@ -30,11 +30,12 @@ import {
   WorkerPermanentError,
   type WorkerPolicies,
 } from './queue/consumer.js';
-import { runAgentPipeline } from './agent/runner.js';
+import { runAgentPipeline, type AgentRunnerResult } from './agent/runner.js';
 import {
   insertAgentEvent,
   insertInboundMessage,
   insertOutboundMessage,
+  insertToolCall,
   upsertConversation,
   upsertUser,
 } from './repositories/message-store.js';
@@ -584,7 +585,18 @@ export const createDefaultProcessor =
 
     let outboundText = buildAutoReplyText(outboundMessage.text);
     let pipelineRoute: 'llm' | 'fallback' = 'fallback';
-    let pipelineMetadata: Record<string, unknown> = { reason: 'default_fallback' };
+    let pipelineMetadata: AgentRunnerResult['metadata'] = {
+      reason: 'default_fallback',
+      agentRoute: null,
+      provider: null,
+      intent: null,
+      confidence: null,
+      toolName: null,
+      toolInput: null,
+      toolOutput: null,
+      toolDurationMs: null,
+      toolSuccess: null,
+    };
 
     try {
       const result = await runAgentPipeline({
@@ -657,6 +669,15 @@ export const createDefaultProcessor =
       pipelineMetadata = {
         reason: 'pipeline_error',
         errorClass: classifiedError.errorClass,
+        agentRoute: null,
+        provider: null,
+        intent: null,
+        confidence: null,
+        toolName: null,
+        toolInput: null,
+        toolOutput: null,
+        toolDurationMs: null,
+        toolSuccess: null,
       };
       outboundText = buildAutoReplyText(outboundMessage.text);
     }
@@ -741,6 +762,59 @@ export const createDefaultProcessor =
           },
           'worker.persistence.agent_event.failed',
         );
+      }
+
+      const usedToolPath = pipelineMetadata.agentRoute === 'tool_path';
+      if (usedToolPath && typeof pipelineMetadata.toolName === 'string') {
+        try {
+          await insertToolCall({
+            conversationId,
+            messageId: inboundMessageId,
+            toolName: pipelineMetadata.toolName,
+            input: pipelineMetadata.toolInput,
+            output: pipelineMetadata.toolOutput,
+            status: pipelineMetadata.toolSuccess ? 'success' : 'failure',
+          });
+        } catch (error: unknown) {
+          logger.error(
+            {
+              event: 'worker.persistence.tool_call.failed',
+              eventKey: job.eventKey,
+              conversationId,
+              toolName: pipelineMetadata.toolName,
+              error: error instanceof Error ? error.message : String(error),
+              traceId: job.traceContext?.traceId,
+              correlationId: job.traceContext?.correlationId,
+            },
+            'worker.persistence.tool_call.failed',
+          );
+        }
+
+        try {
+          await insertAgentEvent({
+            conversationId,
+            messageId: inboundMessageId,
+            eventType: 'tool_call',
+            payload: {
+              toolName: pipelineMetadata.toolName,
+              success: pipelineMetadata.toolSuccess,
+              durationMs: pipelineMetadata.toolDurationMs,
+            },
+          });
+        } catch (error: unknown) {
+          logger.error(
+            {
+              event: 'worker.persistence.agent_event.failed',
+              eventKey: job.eventKey,
+              conversationId,
+              eventType: 'tool_call',
+              error: error instanceof Error ? error.message : String(error),
+              traceId: job.traceContext?.traceId,
+              correlationId: job.traceContext?.correlationId,
+            },
+            'worker.persistence.agent_event.failed',
+          );
+        }
       }
     }
 

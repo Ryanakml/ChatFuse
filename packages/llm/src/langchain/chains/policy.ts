@@ -1,5 +1,6 @@
 import { RunnableLambda } from '@langchain/core/runnables';
 import type { AgentState } from '../types.js';
+import { getRagConfidenceThreshold } from '../config.js';
 
 /**
  * Known prompt injection / jailbreak pattern fragments.
@@ -61,7 +62,7 @@ export const policyChain = RunnableLambda.from(async (state: AgentState) => {
   if (
     state.intent === 'RAG' &&
     state.retrievalConfidence !== undefined &&
-    state.retrievalConfidence < 0.7
+    state.retrievalConfidence < getRagConfidenceThreshold()
   ) {
     finalResponse = 'I need clarification';
   }

@@ -9,6 +9,7 @@ import { retrievalChain } from './chains/retrieval.js';
 import { classificationChain } from './chains/classification.js';
 import { confidenceChain } from './chains/confidence.js';
 import { routerChain } from './chains/router.js';
+import { toolExecutionChain } from './chains/tool-execution.js';
 import { compositionChain } from './chains/composition.js';
 import { policyChain } from './chains/policy.js';
 
@@ -52,6 +53,7 @@ export const processMessagePipeline = RunnableSequence.from([
   classificationChain,
   confidenceChain,
   routerChain,
+  toolExecutionChain,
   compositionChain,
   policyChain,
 ]);

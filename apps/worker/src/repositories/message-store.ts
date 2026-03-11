@@ -6,6 +6,31 @@ type JsonArray = JsonValue[];
 
 let _client: SupabaseClient | null = null;
 
+const toJsonValue = (value: unknown): JsonValue => {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toJsonValue(item));
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+      key,
+      toJsonValue(nestedValue),
+    ]);
+
+    return Object.fromEntries(entries) as JsonObject;
+  }
+
+  return String(value);
+};
+
 function getClient(): SupabaseClient {
   if (_client) return _client;
   const url = process.env.SUPABASE_URL || '';
@@ -160,5 +185,29 @@ export async function insertAgentEvent(input: {
 
   if (error) {
     throw new Error(`insertAgentEvent failed: ${error.message}`);
+  }
+}
+
+export async function insertToolCall(input: {
+  conversationId: string;
+  messageId?: string | null;
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  status: 'success' | 'failure';
+}): Promise<void> {
+  const client = getClient();
+
+  const { error } = await client.from('tool_calls').insert({
+    conversation_id: input.conversationId,
+    message_id: input.messageId ?? null,
+    tool_name: input.toolName,
+    input: toJsonValue(input.input),
+    output: toJsonValue(input.output),
+    status: input.status,
+  });
+
+  if (error) {
+    throw new Error(`insertToolCall failed: ${error.message}`);
   }
 }
