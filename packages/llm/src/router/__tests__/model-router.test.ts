@@ -35,7 +35,7 @@ describe('calculateResponseCost', () => {
       total_tokens: 210,
     };
 
-    const result = calculateResponseCost(message as AIMessage, 'gemini-1.5-flash');
+    const result = calculateResponseCost(message as AIMessage, 'gemini-2.5-flash');
 
     expect(result.provider).toBe('gemini');
     expect(result.usage.inputTokens).toBe(200);
