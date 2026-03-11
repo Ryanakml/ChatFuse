@@ -129,12 +129,12 @@ try {
     };
 
     const outbound = extractOutboundMessageFromIngressPayload(payload);
-    assert.deepEqual(outbound, {
-      messageId: 'wamid-outbound-001',
-      sender: '6281234567890',
-      to: '6281234567890',
-      text: 'halo bot',
-    });
+    assert.ok(outbound);
+    assert.equal(outbound.messageId, 'wamid-outbound-001');
+    assert.equal(outbound.sender, '6281234567890');
+    assert.equal(outbound.to, '6281234567890');
+    assert.equal(outbound.text, 'halo bot');
+    assert.match(outbound.timestamp, /^\d{4}-\d{2}-\d{2}T/);
   });
 
   await runTest('createDefaultProcessor sends outbound WhatsApp text via Graph API', async () => {

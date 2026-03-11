@@ -31,6 +31,13 @@ import {
   type WorkerPolicies,
 } from './queue/consumer.js';
 import { runAgentPipeline } from './agent/runner.js';
+import {
+  insertAgentEvent,
+  insertInboundMessage,
+  insertOutboundMessage,
+  upsertConversation,
+  upsertUser,
+} from './repositories/message-store.js';
 
 dotenv.config();
 
@@ -353,6 +360,11 @@ type OutboundMessage = {
   sender: string;
   to: string;
   text: string;
+  timestamp: string;
+};
+
+type OutboundSendResult = {
+  messageId: string | null;
 };
 
 type StartWorkerOptions = {
@@ -396,9 +408,14 @@ export const extractOutboundMessageFromIngressPayload = (
         const sender = to;
         const textNode = isRecord(message.text) ? message.text : null;
         const text = textNode && typeof textNode.body === 'string' ? textNode.body.trim() : '';
+        const rawTimestamp =
+          typeof message.timestamp === 'string' ? Number.parseInt(message.timestamp, 10) : NaN;
+        const timestamp = Number.isFinite(rawTimestamp)
+          ? new Date(rawTimestamp * 1000).toISOString()
+          : new Date().toISOString();
 
         if (to && text) {
-          return { messageId, sender, to, text };
+          return { messageId, sender, to, text, timestamp };
         }
       }
     }
@@ -418,7 +435,7 @@ export const sendWhatsAppTextMessage = async (
     text: string;
   },
   fetchImpl: FetchLike,
-) => {
+): Promise<OutboundSendResult> => {
   const endpoint = `https://graph.facebook.com/v22.0/${input.phoneNumberId}/messages`;
   const response = await fetchImpl(endpoint, {
     method: 'POST',
@@ -437,7 +454,23 @@ export const sendWhatsAppTextMessage = async (
   });
 
   if (response.ok) {
-    return;
+    const responseBody = await response.text();
+
+    if (responseBody.trim() === '') {
+      return { messageId: null };
+    }
+
+    try {
+      const parsed = JSON.parse(responseBody) as {
+        messages?: Array<{ id?: unknown }>;
+      };
+      const messageId = parsed.messages?.[0]?.id;
+      return {
+        messageId: typeof messageId === 'string' && messageId.trim() !== '' ? messageId : null,
+      };
+    } catch {
+      return { messageId: null };
+    }
   }
 
   const responseBody = await response.text();
@@ -490,6 +523,52 @@ export const createDefaultProcessor =
       return;
     }
 
+    let conversationId: string | null = null;
+    let inboundMessageId: string | null = null;
+
+    try {
+      const userId = await upsertUser({
+        phoneNumber: outboundMessage.sender,
+      });
+      conversationId = await upsertConversation({ userId });
+    } catch (error: unknown) {
+      logger.error(
+        {
+          event: 'worker.persistence.user_conversation.failed',
+          eventKey: job.eventKey,
+          sender: outboundMessage.sender,
+          error: error instanceof Error ? error.message : String(error),
+          traceId: job.traceContext?.traceId,
+          correlationId: job.traceContext?.correlationId,
+        },
+        'worker.persistence.user_conversation.failed',
+      );
+    }
+
+    if (conversationId && outboundMessage.messageId) {
+      try {
+        inboundMessageId = await insertInboundMessage({
+          conversationId,
+          whatsappMessageId: outboundMessage.messageId,
+          body: outboundMessage.text,
+          timestamp: outboundMessage.timestamp,
+        });
+      } catch (error: unknown) {
+        logger.error(
+          {
+            event: 'worker.persistence.inbound_message.failed',
+            eventKey: job.eventKey,
+            conversationId,
+            whatsappMessageId: outboundMessage.messageId,
+            error: error instanceof Error ? error.message : String(error),
+            traceId: job.traceContext?.traceId,
+            correlationId: job.traceContext?.correlationId,
+          },
+          'worker.persistence.inbound_message.failed',
+        );
+      }
+    }
+
     const pipelineStartTime = Date.now();
     logger.info(
       {
@@ -510,8 +589,7 @@ export const createDefaultProcessor =
     try {
       const result = await runAgentPipeline({
         message: outboundMessage.text,
-        // Phase 1 temporary correlation key until persistence-backed conversation IDs are wired.
-        conversationId: outboundMessage.sender,
+        conversationId: conversationId ?? outboundMessage.sender,
         sender: outboundMessage.sender,
       });
 
@@ -542,6 +620,35 @@ export const createDefaultProcessor =
         'agent.pipeline.failure',
       );
 
+      if (conversationId) {
+        try {
+          await insertAgentEvent({
+            conversationId,
+            messageId: inboundMessageId,
+            eventType: 'pipeline_failure',
+            payload: {
+              error: normalizedError.message,
+              errorClass: classifiedError.errorClass,
+              willRetry: !isPermanentError,
+              durationMs: Date.now() - pipelineStartTime,
+            },
+          });
+        } catch (dbError: unknown) {
+          logger.error(
+            {
+              event: 'worker.persistence.agent_event.failed',
+              eventKey: job.eventKey,
+              conversationId,
+              eventType: 'pipeline_failure',
+              error: dbError instanceof Error ? dbError.message : String(dbError),
+              traceId: job.traceContext?.traceId,
+              correlationId: job.traceContext?.correlationId,
+            },
+            'worker.persistence.agent_event.failed',
+          );
+        }
+      }
+
       if (isPermanentError) {
         throw normalizedError;
       }
@@ -568,7 +675,7 @@ export const createDefaultProcessor =
       'agent.pipeline.success',
     );
 
-    await sendWhatsAppTextMessage(
+    const outboundSendResult = await sendWhatsAppTextMessage(
       {
         phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
         accessToken: env.WHATSAPP_ACCESS_TOKEN,
@@ -577,6 +684,65 @@ export const createDefaultProcessor =
       },
       fetchImpl,
     );
+
+    if (conversationId) {
+      const outboundMessageId =
+        outboundSendResult.messageId ?? `outbound-${conversationId}-${Date.now()}`;
+
+      try {
+        await insertOutboundMessage({
+          conversationId,
+          whatsappMessageId: outboundMessageId,
+          body: outboundText,
+        });
+      } catch (error: unknown) {
+        logger.error(
+          {
+            event: 'worker.persistence.outbound_message.failed',
+            eventKey: job.eventKey,
+            conversationId,
+            whatsappMessageId: outboundMessageId,
+            error: error instanceof Error ? error.message : String(error),
+            traceId: job.traceContext?.traceId,
+            correlationId: job.traceContext?.correlationId,
+          },
+          'worker.persistence.outbound_message.failed',
+        );
+      }
+
+      try {
+        await insertAgentEvent({
+          conversationId,
+          messageId: inboundMessageId,
+          eventType: 'pipeline_success',
+          payload: {
+            route:
+              typeof pipelineMetadata.agentRoute === 'string'
+                ? pipelineMetadata.agentRoute
+                : pipelineRoute,
+            provider:
+              typeof pipelineMetadata.provider === 'string' ? pipelineMetadata.provider : null,
+            durationMs: Date.now() - pipelineStartTime,
+            intent: typeof pipelineMetadata.intent === 'string' ? pipelineMetadata.intent : null,
+            confidence:
+              typeof pipelineMetadata.confidence === 'number' ? pipelineMetadata.confidence : null,
+          },
+        });
+      } catch (error: unknown) {
+        logger.error(
+          {
+            event: 'worker.persistence.agent_event.failed',
+            eventKey: job.eventKey,
+            conversationId,
+            eventType: 'pipeline_success',
+            error: error instanceof Error ? error.message : String(error),
+            traceId: job.traceContext?.traceId,
+            correlationId: job.traceContext?.correlationId,
+          },
+          'worker.persistence.agent_event.failed',
+        );
+      }
+    }
 
     logger.info(
       {
