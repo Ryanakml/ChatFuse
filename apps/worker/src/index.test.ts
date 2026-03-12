@@ -164,6 +164,23 @@ try {
             text: async () => '{"messages":[{"id":"wamid.outbound.001"}]}',
           };
         },
+        {
+          agentRunner: async (input) => ({
+            text: input.message,
+            route: 'fallback',
+            metadata: {
+              agentRoute: null,
+              provider: null,
+              intent: null,
+              confidence: null,
+              toolName: null,
+              toolInput: null,
+              toolOutput: null,
+              toolDurationMs: null,
+              toolSuccess: null,
+            },
+          }),
+        },
       );
 
       await processor(

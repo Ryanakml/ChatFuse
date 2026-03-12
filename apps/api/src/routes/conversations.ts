@@ -1,6 +1,7 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { authenticateRequest, requireRole } from '../auth.js';
 import { conversationRepository } from '../repositories/conversation.js';
+import { isDatabaseUnavailableError } from '../repositories/errors.js';
 
 export const conversationsRouter = Router();
 
@@ -8,12 +9,39 @@ export const conversationsRouter = Router();
 conversationsRouter.use(authenticateRequest);
 conversationsRouter.use(requireRole('support_agent')); // Admins also pass this check
 
+const parsePositiveInteger = (value: unknown): number | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
+};
+
+const handleRepositoryError = (res: Response, error: unknown, fallbackMessage: string) => {
+  if (isDatabaseUnavailableError(error)) {
+    res.status(503).json({ error: 'Database unavailable' });
+    return;
+  }
+  res.status(500).json({ error: fallbackMessage });
+};
+
 conversationsRouter.get('/', async (req, res) => {
   try {
-    const list = await conversationRepository.listActiveConversations();
+    const page = parsePositiveInteger(req.query['page']);
+    const pageSize = parsePositiveInteger(req.query['pageSize']);
+    const search = typeof req.query['search'] === 'string' ? req.query['search'] : undefined;
+
+    const list = await conversationRepository.listActiveConversations({
+      ...(page !== undefined && { page }),
+      ...(pageSize !== undefined && { pageSize }),
+      ...(search !== undefined && { search }),
+    });
     res.json(list);
-  } catch {
-    res.status(500).json({ error: 'Failed to fetch conversations' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to fetch conversations');
   }
 });
 
@@ -21,8 +49,8 @@ conversationsRouter.get('/escalations', async (req, res) => {
   try {
     const list = await conversationRepository.listUnresolvedConversations();
     res.json(list);
-  } catch {
-    res.status(500).json({ error: 'Failed to fetch escalations' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to fetch escalations');
   }
 });
 
@@ -30,8 +58,8 @@ conversationsRouter.get('/:id/timeline', async (req, res) => {
   try {
     const timeline = await conversationRepository.getConversationTimeline(req.params.id);
     res.json(timeline);
-  } catch {
-    res.status(500).json({ error: 'Failed to fetch timeline' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to fetch timeline');
   }
 });
 
@@ -41,8 +69,8 @@ conversationsRouter.post('/:id/takeover', async (req, res) => {
     const operatorId = req.header('x-wa-user') || 'unknown';
     await conversationRepository.takeoverConversation(req.params.id, operatorId);
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to take over conversation' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to take over conversation');
   }
 });
 
@@ -51,8 +79,8 @@ conversationsRouter.post('/:id/return', async (req, res) => {
     const operatorId = req.header('x-wa-user') || 'unknown';
     await conversationRepository.returnToBot(req.params.id, operatorId);
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to return conversation to bot' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to return conversation to bot');
   }
 });
 
@@ -68,8 +96,8 @@ conversationsRouter.post('/:id/messages', async (req, res) => {
 
     // In a real app we would ALSO broadcast this out to WhatsApp here
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to send message' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to send message');
   }
 });
 
@@ -78,8 +106,8 @@ conversationsRouter.post('/:id/assign', async (req, res) => {
     const { operatorId } = req.body;
     await conversationRepository.assignConversationOwner(req.params.id, operatorId ?? null);
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to assign conversation' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to assign conversation');
   }
 });
 
@@ -92,7 +120,7 @@ conversationsRouter.post('/:id/status', async (req, res) => {
     }
     await conversationRepository.updateEscalationStatus(req.params.id, status);
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to update conversation status' });
+  } catch (error) {
+    handleRepositoryError(res, error, 'Failed to update conversation status');
   }
 });
