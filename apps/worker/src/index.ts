@@ -368,6 +368,16 @@ type OutboundSendResult = {
   messageId: string | null;
 };
 
+type AgentPipelineRunner = (input: {
+  message: string;
+  conversationId: string;
+  sender: string;
+}) => Promise<AgentRunnerResult>;
+
+type DefaultProcessorDependencies = {
+  agentRunner?: AgentPipelineRunner;
+};
+
 type StartWorkerOptions = {
   processor?: IngressJobProcessor;
   registerSignalHandlers?: boolean;
@@ -491,12 +501,14 @@ export const createDefaultProcessor =
       WHATSAPP_ACCESS_TOKEN: string;
     },
     fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike,
+    dependencies: DefaultProcessorDependencies = {},
   ): IngressJobProcessor =>
   async (job: IngressJobPayload) => {
     if (typeof fetchImpl !== 'function') {
       throw new Error('Global fetch is not available in this runtime');
     }
 
+    const agentRunner = dependencies.agentRunner ?? runAgentPipeline;
     const outboundMessage = extractOutboundMessageFromIngressPayload(job.payload);
 
     logger.info(
@@ -599,7 +611,7 @@ export const createDefaultProcessor =
     };
 
     try {
-      const result = await runAgentPipeline({
+      const result = await agentRunner({
         message: outboundMessage.text,
         conversationId: conversationId ?? outboundMessage.sender,
         sender: outboundMessage.sender,

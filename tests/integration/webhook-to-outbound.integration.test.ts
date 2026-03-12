@@ -1,5 +1,5 @@
 /**
- * E2E Test: Webhook Ingest → Queue → Agent → Outbound Send (L2 – E2E)
+ * Integration Test: Webhook Ingest → Queue → Agent → Outbound Send (L2)
  */
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
@@ -41,12 +41,12 @@ function buildEnv(): NodeJS.ProcessEnv {
     NODE_ENV: 'test',
     ALLOW_INSECURE_HTTP: 'true',
     PORT: '0',
-    WHATSAPP_VERIFY_TOKEN: 'verify-token-e2e',
-    WHATSAPP_APP_SECRET: 'secret-e2e',
-    WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
-    WHATSAPP_ACCESS_TOKEN: 'token-e2e',
-    OPENAI_API_KEY: 'openai-key-e2e',
-    GEMINI_API_KEY: 'gemini-key-e2e',
+    WHATSAPP_VERIFY_TOKEN: 'verify-token-integration',
+    WHATSAPP_APP_SECRET: 'secret-integration',
+    WHATSAPP_PHONE_NUMBER_ID: 'phone-integration',
+    WHATSAPP_ACCESS_TOKEN: 'token-integration',
+    OPENAI_API_KEY: 'openai-key-integration',
+    GEMINI_API_KEY: 'gemini-key-integration',
     REDIS_URL: 'redis://localhost:6379',
     SUPABASE_URL: 'https://mock.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'mock-key',
@@ -98,40 +98,43 @@ async function withServer<T>(
   const app = createApp(env, { idempotencyStore, ingressQueue, observability });
 
   return new Promise<T>((resolve, reject) => {
-    const server = (app as ReturnType<(typeof import('express'))['default']>).listen(
-      0,
-      async () => {
-        try {
-          const addr = server.address() as { port: number };
-          const baseUrl = `http://localhost:${addr.port}`;
-          const result = await fn(baseUrl, enqueuedJobs);
-          server.close();
-          resolve(result);
-        } catch (err) {
-          server.close();
-          reject(err);
+    const server = app.listen(0, async (listenError?: Error) => {
+      if (listenError) {
+        reject(listenError);
+        return;
+      }
+
+      try {
+        const addr = server.address();
+        if (!addr || typeof addr === 'string') {
+          throw new Error('Test server failed to bind to an ephemeral TCP port');
         }
-      },
-    );
+        const baseUrl = `http://localhost:${addr.port}`;
+        const result = await fn(baseUrl, enqueuedJobs);
+        server.close();
+        resolve(result);
+      } catch (err) {
+        server.close();
+        reject(err);
+      }
+    });
   });
 }
 
-console.log(
-  `${color.cyan}E2E: Webhook Ingest → Queue → Agent → Outbound Send (L2 – E2E)${color.reset}\n`,
-);
+console.log(`${color.cyan}Integration: Webhook Ingest -> Queue -> Outbound Send${color.reset}\n`);
 
 const main = async () => {
   await runTest('POST /webhook with valid signature → 200 and job is enqueued', async () => {
     await withServer(async (baseUrl, enqueuedJobs) => {
       const payload = JSON.stringify({ object: 'whatsapp_business_account' });
-      const signature = signBody(payload, 'secret-e2e');
+      const signature = signBody(payload, 'secret-integration');
 
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Hub-Signature-256': signature,
-          'X-Correlation-ID': 'e2e-correlation-001',
+          'X-Correlation-ID': 'integration-correlation-001',
         },
         body: payload,
       });
@@ -144,14 +147,14 @@ const main = async () => {
   await runTest('Enqueued job contains eventKey, traceId, and correlationId', async () => {
     await withServer(async (baseUrl, enqueuedJobs) => {
       const payload = JSON.stringify({ object: 'whatsapp_business_account' });
-      const signature = signBody(payload, 'secret-e2e');
+      const signature = signBody(payload, 'secret-integration');
 
       await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Hub-Signature-256': signature,
-          'X-Correlation-ID': 'e2e-correlation-002',
+          'X-Correlation-ID': 'integration-correlation-002',
         },
         body: payload,
       });
@@ -161,7 +164,7 @@ const main = async () => {
       assert.ok(job.eventKey, 'eventKey must be present');
       assert.ok(job.traceContext, 'traceContext must be present');
       assert.ok(job.traceContext.traceId, 'traceId must be present');
-      assert.equal(job.traceContext.correlationId, 'e2e-correlation-002');
+      assert.equal(job.traceContext.correlationId, 'integration-correlation-002');
     });
   });
 
@@ -176,10 +179,10 @@ const main = async () => {
                 value: {
                   messages: [
                     {
-                      id: 'wamid-e2e-001',
+                      id: 'wamid-integration-001',
                       from: '628111222333',
                       type: 'text',
-                      text: { body: 'hello from e2e' },
+                      text: { body: 'hello from integration' },
                     },
                   ],
                 },
@@ -188,7 +191,7 @@ const main = async () => {
           },
         ],
       });
-      const signature = signBody(payload, 'secret-e2e');
+      const signature = signBody(payload, 'secret-integration');
 
       await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
@@ -206,8 +209,8 @@ const main = async () => {
 
       const processor = createDefaultProcessor(
         {
-          WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
-          WHATSAPP_ACCESS_TOKEN: 'token-e2e',
+          WHATSAPP_PHONE_NUMBER_ID: 'phone-integration',
+          WHATSAPP_ACCESS_TOKEN: 'token-integration',
         },
         async (input, init) => {
           calledUrl = input;
@@ -231,13 +234,13 @@ const main = async () => {
         processor,
       });
 
-      assert.equal(calledUrl, 'https://graph.facebook.com/v22.0/phone-e2e/messages');
+      assert.equal(calledUrl, 'https://graph.facebook.com/v22.0/phone-integration/messages');
       const outboundPayload = JSON.parse(calledBody) as {
         to: string;
         text: { body: string };
       };
       assert.equal(outboundPayload.to, '628111222333');
-      assert.match(outboundPayload.text.body, /hello from e2e/);
+      assert.match(outboundPayload.text.body, /hello from integration/);
     });
   });
 
@@ -245,7 +248,7 @@ const main = async () => {
     console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
     process.exit(1);
   } else {
-    console.log(`\n${color.green}All E2E webhook-to-outbound tests passed.${color.reset}`);
+    console.log(`\n${color.green}All integration webhook-to-outbound tests passed.${color.reset}`);
   }
 };
 

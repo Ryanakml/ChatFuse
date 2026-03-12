@@ -1,5 +1,5 @@
 /**
- * E2E Test: Escalation Handoff (L2 – E2E)
+ * Integration Test: Escalation Handoff (L2)
  */
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
@@ -46,12 +46,12 @@ async function withServer<T>(
     NODE_ENV: 'test',
     ALLOW_INSECURE_HTTP: 'true',
     PORT: '0',
-    WHATSAPP_VERIFY_TOKEN: 'verify-token-e2e',
-    WHATSAPP_APP_SECRET: 'secret-e2e',
-    WHATSAPP_PHONE_NUMBER_ID: 'phone-e2e',
-    WHATSAPP_ACCESS_TOKEN: 'token-e2e',
-    OPENAI_API_KEY: 'openai-key-e2e',
-    GEMINI_API_KEY: 'gemini-key-e2e',
+    WHATSAPP_VERIFY_TOKEN: 'verify-token-integration',
+    WHATSAPP_APP_SECRET: 'secret-integration',
+    WHATSAPP_PHONE_NUMBER_ID: 'phone-integration',
+    WHATSAPP_ACCESS_TOKEN: 'token-integration',
+    OPENAI_API_KEY: 'openai-key-integration',
+    GEMINI_API_KEY: 'gemini-key-integration',
     REDIS_URL: 'redis://localhost:6379',
     SUPABASE_URL: 'https://mock.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'mock-key',
@@ -94,25 +94,30 @@ async function withServer<T>(
   const app = createApp(env, { idempotencyStore, ingressQueue, observability });
 
   return new Promise<T>((resolve, reject) => {
-    const server = (app as ReturnType<(typeof import('express'))['default']>).listen(
-      0,
-      async () => {
-        try {
-          const addr = server.address() as { port: number };
-          const baseUrl = `http://localhost:${addr.port}`;
-          const result = await fn(baseUrl, enqueuedJobs);
-          server.close();
-          resolve(result);
-        } catch (err) {
-          server.close();
-          reject(err);
+    const server = app.listen(0, async (listenError?: Error) => {
+      if (listenError) {
+        reject(listenError);
+        return;
+      }
+
+      try {
+        const addr = server.address();
+        if (!addr || typeof addr === 'string') {
+          throw new Error('Test server failed to bind to an ephemeral TCP port');
         }
-      },
-    );
+        const baseUrl = `http://localhost:${addr.port}`;
+        const result = await fn(baseUrl, enqueuedJobs);
+        server.close();
+        resolve(result);
+      } catch (err) {
+        server.close();
+        reject(err);
+      }
+    });
   });
 }
 
-console.log(`${color.cyan}E2E: Escalation Handoff (L2 – E2E)${color.reset}\n`);
+console.log(`${color.cyan}Integration: Escalation Handoff${color.reset}\n`);
 
 const main = async () => {
   await runTest('Escalation-triggering message is enqueued correctly', async () => {
@@ -142,7 +147,7 @@ const main = async () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Hub-Signature-256': signBody(escalationPayload, 'secret-e2e'),
+          'X-Hub-Signature-256': signBody(escalationPayload, 'secret-integration'),
         },
         body: escalationPayload,
       });
@@ -179,7 +184,7 @@ const main = async () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Hub-Signature-256': signBody(escalationPayload, 'secret-e2e'),
+          'X-Hub-Signature-256': signBody(escalationPayload, 'secret-integration'),
         },
         body: escalationPayload,
       });
@@ -215,7 +220,7 @@ const main = async () => {
     console.error(`\n${color.red}${failed} test(s) failed.${color.reset}`);
     process.exit(1);
   } else {
-    console.log(`\n${color.green}All escalation handoff E2E tests passed.${color.reset}`);
+    console.log(`\n${color.green}All escalation handoff integration tests passed.${color.reset}`);
   }
 };
 

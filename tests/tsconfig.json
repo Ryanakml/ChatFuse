@@ -14,7 +14,7 @@
       "@wa-chat/config": ["packages/config/src/index.ts"]
     }
   },
-  "include": ["e2e/**/*.ts", "load/**/*.ts"],
+  "include": ["integration/**/*.ts", "acceptance/**/*.ts", "load/**/*.ts"],
   "references": [
     { "path": "../apps/api" },
     { "path": "../apps/worker" },
