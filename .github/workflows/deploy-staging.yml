@@ -84,30 +84,16 @@ jobs:
         with:
           name: build-${{ needs.build.outputs.sha_short }}
 
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Deploy API to staging
+      - name: Deploy services to staging (Render)
         run: |
-          echo "[PLACEHOLDER] Deploying API service to staging..."
-          echo "Replace this step with your hosting provider deploy command."
-          echo "Example (Railway): railway up --service api --detach"
-          echo "Example (Fly.io): fly deploy --app wa-chat-api-staging --remote-only"
-          echo "Example (Render): curl -X POST '${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}'"
-        env:
-          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
-          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
-          STAGING_REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
-          STAGING_OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
-          STAGING_GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
-          STAGING_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_NUMBER_ID }}
-          STAGING_WHATSAPP_ACCESS_TOKEN: ${{ secrets.STAGING_WHATSAPP_ACCESS_TOKEN }}
-          STAGING_WHATSAPP_APP_SECRET: ${{ secrets.STAGING_WHATSAPP_APP_SECRET }}
-          STAGING_WHATSAPP_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_VERIFY_TOKEN }}
-
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Deploy Worker to staging
-        run: |
-          echo "[PLACEHOLDER] Deploying Worker service to staging..."
-          echo "Replace this step with your hosting provider deploy command."
+          echo "Triggering Render deployment for staging services..."
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_STAGING_API }}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": false}' \
+            --fail \
+            --silent \
+            --show-error
+          echo "Render deployment trigger sent successfully."
 
       - name: Wait for staging to become healthy
         run: |
