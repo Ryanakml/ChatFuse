@@ -1,9 +1,12 @@
 import type { ConversationSummary } from '@wa-chat/shared';
 import { EscalationRow } from './EscalationRow';
 
+export const dynamic = 'force-dynamic';
+
 async function getEscalations(): Promise<ConversationSummary[]> {
   try {
-    const res = await fetch('http://localhost:3001/api/conversations/escalations', {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const res = await fetch(`${apiUrl}/api/conversations/escalations`, {
       headers: {
         'x-wa-user': 'ops-admin',
         'x-wa-role': 'admin',

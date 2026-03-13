@@ -1,12 +1,15 @@
 import type { ConversationSummary } from '@wa-chat/shared';
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+
 // Use a relative valid proxy or local call against Next.js in production
 // For now, this queries the local api server on port 3001
 async function getConversations(): Promise<ConversationSummary[]> {
   try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     // Requires support_agent role, we'll mock the headers here for dashboard SSR
-    const res = await fetch('http://localhost:3001/api/conversations', {
+    const res = await fetch(`${apiUrl}/api/conversations`, {
       headers: {
         'x-wa-user': 'ops-admin',
         'x-wa-role': 'admin',
