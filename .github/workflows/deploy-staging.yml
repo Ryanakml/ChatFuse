@@ -2,7 +2,7 @@ name: Deploy — Staging
 
 on:
   push:
-    branches: [main]
+    branches: [phase/release-go-live]
   workflow_dispatch:
     inputs:
       reason:
@@ -84,30 +84,16 @@ jobs:
         with:
           name: build-${{ needs.build.outputs.sha_short }}
 
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Deploy API to staging
+      - name: Deploy services to staging (Render)
         run: |
-          echo "[PLACEHOLDER] Deploying API service to staging..."
-          echo "Replace this step with your hosting provider deploy command."
-          echo "Example (Railway): railway up --service api --detach"
-          echo "Example (Fly.io): fly deploy --app wa-chat-api-staging --remote-only"
-          echo "Example (Render): curl -X POST '${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}'"
-        env:
-          STAGING_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
-          STAGING_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
-          STAGING_REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
-          STAGING_OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
-          STAGING_GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
-          STAGING_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_NUMBER_ID }}
-          STAGING_WHATSAPP_ACCESS_TOKEN: ${{ secrets.STAGING_WHATSAPP_ACCESS_TOKEN }}
-          STAGING_WHATSAPP_APP_SECRET: ${{ secrets.STAGING_WHATSAPP_APP_SECRET }}
-          STAGING_WHATSAPP_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_VERIFY_TOKEN }}
-
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Deploy Worker to staging
-        run: |
-          echo "[PLACEHOLDER] Deploying Worker service to staging..."
-          echo "Replace this step with your hosting provider deploy command."
+          echo "Triggering Render deployment for staging services..."
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_STAGING_API }}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": false}' \
+            --fail \
+            --silent \
+            --show-error
+          echo "Render deployment trigger sent successfully."
 
       - name: Wait for staging to become healthy
         run: |
@@ -149,10 +135,10 @@ jobs:
           WHATSAPP_VERIFY_TOKEN: ${{ secrets.STAGING_WHATSAPP_VERIFY_TOKEN }}
 
   # ─────────────────────────────────────────────────────────────
-  # Job 4: E2E suite against staging
+  # Job 4: Integration suite against staging
   # ─────────────────────────────────────────────────────────────
-  e2e:
-    name: E2E Tests (Staging)
+  integration:
+    name: Integration Tests (Staging)
     runs-on: ubuntu-latest
     needs: smoke-test
     steps:
@@ -168,8 +154,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run E2E suite against staging
-        run: npm run test:e2e
+      - name: Run integration suite against staging
+        run: npm run test:integration
         env:
           NODE_ENV: staging
           API_URL: ${{ secrets.STAGING_API_URL }}
@@ -181,13 +167,13 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
 
-      - name: Upload E2E results
+      - name: Upload integration results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results-staging-${{ github.run_id }}
+          name: integration-results-staging-${{ github.run_id }}
           path: |
-            **/e2e-results/
+            **/integration-results/
             **/test-results/
           retention-days: 14
 
@@ -229,20 +215,20 @@ jobs:
   staging-gate:
     name: Staging Gate (Summary)
     runs-on: ubuntu-latest
-    needs: [smoke-test, e2e, observability-check]
+    needs: [smoke-test, integration, observability-check]
     if: always()
     steps:
       - name: Check all gate results
         run: |
           SMOKE="${{ needs.smoke-test.result }}"
-          E2E="${{ needs.e2e.result }}"
+          INTEGRATION="${{ needs.integration.result }}"
           OBS="${{ needs.observability-check.result }}"
 
           echo "Smoke Test: $SMOKE"
-          echo "E2E:        $E2E"
+          echo "Integration: $INTEGRATION"
           echo "Observability: $OBS"
 
-          if [ "$SMOKE" != "success" ] || [ "$E2E" != "success" ]; then
+          if [ "$SMOKE" != "success" ] || [ "$INTEGRATION" != "success" ]; then
             echo "STAGING GATE FAILED. Production deploy is blocked."
             exit 1
           fi

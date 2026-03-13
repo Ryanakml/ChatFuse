@@ -8,6 +8,8 @@ import {
   addChunksToVectorStore,
 } from './vectorstore.js';
 
+export { singleDocumentUpsert, clearDocumentChunks, addChunksToVectorStore };
+
 /**
  * Parses and loads documents based on type.
  * Note: PDF loader handles File/Blob/Buffer natively.
@@ -32,10 +34,20 @@ export async function loadDocument(source: IngestionSource) {
   return docs;
 }
 
-export async function ingestKnowledge(source: IngestionSource) {
-  // 1. Parse & Normalize (Basic for now)
+export async function createDocuments(source: IngestionSource) {
   const docs = await loadDocument(source);
+  const textSplitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 200,
+  });
 
+  return textSplitter.createDocuments(
+    docs.map((d) => d.pageContent),
+    docs.map((d) => d.metadata),
+  );
+}
+
+export async function ingestKnowledge(source: IngestionSource) {
   // 2. Upsert to DB to get `document_id`
   const docVersion = source.version || '1.0.0';
   const docMetadata = {
@@ -55,14 +67,7 @@ export async function ingestKnowledge(source: IngestionSource) {
   await clearDocumentChunks(storedDoc.id);
 
   // 4. Chunking
-  const textSplitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 1000,
-    chunkOverlap: 200,
-  });
-  const splitDocs = await textSplitter.createDocuments(
-    docs.map((d) => d.pageContent),
-    docs.map((d) => d.metadata),
-  );
+  const splitDocs = await createDocuments(source);
 
   // 5. Embedding & Upserting via VectorStore
   const embeddings = getEmbeddings();

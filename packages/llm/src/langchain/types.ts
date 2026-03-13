@@ -19,4 +19,11 @@ export interface AgentState {
   composedResponse?: string;
   finalResponse?: string;
   isSafe?: boolean;
+  toolExecution?: {
+    toolName: string | null;
+    toolInput: Record<string, unknown> | null;
+    toolOutput: unknown;
+    toolDurationMs: number;
+    toolSuccess: boolean;
+  };
 }

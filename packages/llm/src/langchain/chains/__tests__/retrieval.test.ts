@@ -54,4 +54,20 @@ describe('retrievalChain', () => {
     expect(result.retrievedContext).toBe('');
     expect(result.retrievalConfidence).toBe(0);
   });
+
+  it('uses RAG_CONFIDENCE_THRESHOLD when configured', async () => {
+    process.env.RAG_CONFIDENCE_THRESHOLD = '0.82';
+    searchSpy.mockResolvedValue([]);
+
+    const state: AgentState = {
+      originalInput: 'hello',
+      normalizedInput: 'hello query',
+      context: { userId: '1', conversationId: '2', history: [] },
+    };
+
+    await retrievalChain.invoke(state);
+
+    expect(searchSpy).toHaveBeenCalledWith(expect.anything(), 'hello query', 4, 0.82);
+    delete process.env.RAG_CONFIDENCE_THRESHOLD;
+  });
 });

@@ -33,6 +33,21 @@ describe('confidenceChain', () => {
     expect(result.confidence).toBe(0.3); // Triggers fallback
   });
 
+  it('should respect RAG_CONFIDENCE_THRESHOLD when configured', async () => {
+    process.env.RAG_CONFIDENCE_THRESHOLD = '0.9';
+
+    const state: AgentState = {
+      originalInput: 'test',
+      intent: 'RAG',
+      retrievalConfidence: 0.85,
+    };
+
+    const result = await confidenceChain.invoke(state);
+    expect(result.confidence).toBe(0.3);
+
+    delete process.env.RAG_CONFIDENCE_THRESHOLD;
+  });
+
   it('should return 0.9 confidence for RAG intent when retrievalConfidence is undefined (legacy behavior)', async () => {
     const state: AgentState = {
       originalInput: 'test',

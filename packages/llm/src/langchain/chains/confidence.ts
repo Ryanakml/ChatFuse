@@ -1,5 +1,6 @@
 import { RunnableLambda } from '@langchain/core/runnables';
 import type { AgentState } from '../types.js';
+import { getRagConfidenceThreshold } from '../config.js';
 
 /**
  * Step 4: Confidence evaluation step.
@@ -13,7 +14,10 @@ export const confidenceChain = RunnableLambda.from(async (state: AgentState) => 
     confidence = 0.9;
   } else if (state.intent === 'RAG') {
     // Reject low-confidence retrieval and trigger fallback
-    if (state.retrievalConfidence !== undefined && state.retrievalConfidence < 0.7) {
+    if (
+      state.retrievalConfidence !== undefined &&
+      state.retrievalConfidence < getRagConfidenceThreshold()
+    ) {
       confidence = 0.3; // Below 0.6 will route to clarification_path
     } else {
       confidence = 0.9;

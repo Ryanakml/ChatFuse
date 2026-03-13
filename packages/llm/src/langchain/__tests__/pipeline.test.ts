@@ -61,7 +61,9 @@ describe('LangChain Orchestration Pipeline (G2)', () => {
     expect(state.normalizedInput).toBe('track my order 123');
     expect(state.intent).toBe('TOOL');
     expect(state.route).toBe('tool_path');
-    expect(state.composedResponse).toContain('[TOOL RESPONSE]');
+    expect(state.composedResponse).toContain('processing');
+    expect(state.toolExecution?.toolName).toBe('order_status_lookup');
+    expect(state.toolExecution?.toolSuccess).toBe(true);
     expect(state.isSafe).toBe(true);
   });
 

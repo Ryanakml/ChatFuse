@@ -2,6 +2,7 @@ import { RunnableLambda } from '@langchain/core/runnables';
 import type { AgentState } from '../types.js';
 import { getVectorStore, searchKnowledge } from '../../rag/vectorstore.js';
 import { getEmbeddings } from '../../rag/embeddings.js';
+import { getRagConfidenceThreshold } from '../config.js';
 
 /**
  * Step 2: Session/context retrieval step.
@@ -19,7 +20,12 @@ export const retrievalChain = RunnableLambda.from(async (state: AgentState) => {
     // const filters = { locale: 'en-US' };
 
     // Perform semantic search with a threshold
-    const results = await searchKnowledge(vectorStore, state.normalizedInput, 4, 0.7);
+    const results = await searchKnowledge(
+      vectorStore,
+      state.normalizedInput,
+      4,
+      getRagConfidenceThreshold(),
+    );
 
     const firstResult = results[0];
     if (results.length > 0 && firstResult) {

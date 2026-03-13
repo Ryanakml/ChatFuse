@@ -1,5 +1,8 @@
 import { RunnableLambda } from '@langchain/core/runnables';
+import { appMetrics, logger } from '@wa-chat/shared';
 import type { AgentState } from '../types.js';
+import { getRagConfidenceThreshold } from '../config.js';
+import { classifyPolicyWithGroq, type RoutedPolicyAction } from './groq-classifier.js';
 
 /**
  * Known prompt injection / jailbreak pattern fragments.
@@ -26,26 +29,77 @@ const PROMPT_INJECTION_PATTERNS: RegExp[] = [
 
 const BLOCKED_RESPONSE = 'I cannot process this request.';
 
+const fallbackPolicyAction = (input: string): RoutedPolicyAction =>
+  PROMPT_INJECTION_PATTERNS.some((pattern) => pattern.test(input)) ? 'block' : 'allow';
+
+const classifyPolicyAction = async (
+  input: string,
+): Promise<{ policyAction: RoutedPolicyAction; source: 'GROQ' | 'FALLBACK' }> => {
+  try {
+    const classified = await classifyPolicyWithGroq(input);
+    logger.debug(
+      {
+        classificationSource: 'GROQ',
+        policyAction: classified.policyAction,
+        confidence: classified.confidence,
+      },
+      'Policy classification completed',
+    );
+
+    return {
+      policyAction: classified.policyAction,
+      source: 'GROQ',
+    };
+  } catch (error) {
+    const fallbackAction = fallbackPolicyAction(input);
+    appMetrics.agentParseFailureCount?.add?.(1, {
+      stage: 'policy_classification',
+      source: 'fallback',
+    });
+    logger.warn(
+      {
+        error,
+        classificationSource: 'FALLBACK',
+        policyAction: fallbackAction,
+      },
+      'Groq policy classification failed, fallback used',
+    );
+
+    return {
+      policyAction: fallbackAction,
+      source: 'FALLBACK',
+    };
+  }
+};
+
 /**
  * Step 7: Post-processing and policy filter chain.
  * Enforces output boundaries and finalizes response.
  * Also performs input-side prompt injection mitigation.
  */
 export const policyChain = RunnableLambda.from(async (state: AgentState) => {
-  // --- Input-side: prompt injection mitigation ---
   const inputStr =
     typeof state.originalInput === 'string'
       ? state.originalInput
       : JSON.stringify(state.originalInput ?? '');
 
-  const isInjectionAttempt = PROMPT_INJECTION_PATTERNS.some((pattern) => pattern.test(inputStr));
+  const { policyAction } = await classifyPolicyAction(inputStr);
 
-  if (isInjectionAttempt) {
+  if (policyAction === 'block') {
     return {
       ...state,
       isSafe: false,
       intent: 'BLOCKED',
       finalResponse: BLOCKED_RESPONSE,
+    } as AgentState;
+  }
+
+  if (policyAction === 'clarify') {
+    return {
+      ...state,
+      isSafe: true,
+      intent: state.intent === 'ESCALATION' ? state.intent : 'CLARIFICATION',
+      finalResponse: 'I need clarification',
     } as AgentState;
   }
 
@@ -61,7 +115,7 @@ export const policyChain = RunnableLambda.from(async (state: AgentState) => {
   if (
     state.intent === 'RAG' &&
     state.retrievalConfidence !== undefined &&
-    state.retrievalConfidence < 0.7
+    state.retrievalConfidence < getRagConfidenceThreshold()
   ) {
     finalResponse = 'I need clarification';
   }

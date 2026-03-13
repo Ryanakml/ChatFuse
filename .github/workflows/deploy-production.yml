@@ -120,25 +120,17 @@ jobs:
       - name: Build
         run: npm run build
 
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Deploy canary API
+      - name: Deploy canary to production (Render)
         run: |
-          echo "[PLACEHOLDER] Deploying canary slice to production..."
-          echo "Replace with your provider's canary deploy command."
-          echo "Example (Fly.io): fly deploy --app wa-chat-api-prod --strategy canary"
-          echo "Example (k8s/Helm): helm upgrade --set image.tag=$SHA --set replicaCount.canary=1"
-          echo "Example (no-native-canary): Deploy to a separate 'api-canary' service; route 10% traffic via load balancer."
-        env:
-          SHA: ${{ needs.preflight.outputs.deploy_sha }}
-          PROD_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
-          PROD_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.PROD_SUPABASE_SERVICE_ROLE_KEY }}
-          PROD_REDIS_URL: ${{ secrets.PROD_REDIS_URL }}
-          PROD_OPENAI_API_KEY: ${{ secrets.PROD_OPENAI_API_KEY }}
-          PROD_GEMINI_API_KEY: ${{ secrets.PROD_GEMINI_API_KEY }}
-          PROD_WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.PROD_WHATSAPP_PHONE_NUMBER_ID }}
-          PROD_WHATSAPP_ACCESS_TOKEN: ${{ secrets.PROD_WHATSAPP_ACCESS_TOKEN }}
-          PROD_WHATSAPP_APP_SECRET: ${{ secrets.PROD_WHATSAPP_APP_SECRET }}
-          PROD_WHATSAPP_VERIFY_TOKEN: ${{ secrets.PROD_WHATSAPP_VERIFY_TOKEN }}
+          echo "Triggering Render production deployment (canary phase)..."
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_PROD_API }}" \
+            -H "Content-Type: application/json" \
+            -d '{"clearCache": false}' \
+            --fail \
+            --silent \
+            --show-error
+          echo "Render production deployment trigger sent successfully."
+          echo "Deploy SHA: ${{ needs.preflight.outputs.deploy_sha }}"
 
       - name: Wait for canary to become healthy
         run: |
@@ -193,15 +185,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.deploy_sha }}
 
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Promote canary to full production
+      - name: Confirm canary promotion (Render)
         run: |
-          echo "[PLACEHOLDER] Promoting canary to 100% production traffic."
-          echo "Example (Fly.io): fly deploy --app wa-chat-api-prod --strategy immediate"
-          echo "Example (Render): Update the non-canary service to the new image."
-          echo "Example (k8s): helm upgrade --set image.tag=$SHA --set replicaCount.canary=0 --set replicaCount.stable=N"
-        env:
-          SHA: ${{ needs.preflight.outputs.deploy_sha }}
+          echo "Canary validation passed. Production deployment is live."
+          echo "Deploy SHA: ${{ needs.preflight.outputs.deploy_sha }}"
+          echo "Note: Render deploys atomically; canary and promotion are the same step."
 
       - name: Verify production health post-promote
         run: |
@@ -233,15 +221,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── REPLACE THIS STEP WITH YOUR PROVIDER ──
-      - name: Rollback canary to previous stable version
+      - name: Rollback to previous stable (Render API)
         run: |
-          echo "[PLACEHOLDER] ROLLING BACK — canary validation failed."
-          echo "Remove the canary deployment and restore previous stable."
-          echo "Example (Fly.io): fly releases list --app wa-chat-api-prod | head -3"
-          echo "  then: fly releases rollback --app wa-chat-api-prod"
-          echo "Example (Render): Re-deploy previous image via Render API."
-          echo "Example (k8s): helm rollback wa-chat 0"
+          echo "ROLLING BACK — canary validation failed."
+          echo "Calling Render API to rollback to previous deploy..."
+          RENDER_API_KEY="${{ secrets.RENDER_API_KEY }}"
+          SERVICE_ID="${{ secrets.RENDER_PROD_SERVICE_ID }}"
+          # Get the last successful deploy (skip the current failed one)
+          PREVIOUS_DEPLOY=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$SERVICE_ID/deploys?limit=2" | \
+            jq -r '.deploys[1].id')
+          if [ -z "$PREVIOUS_DEPLOY" ] || [ "$PREVIOUS_DEPLOY" = "null" ]; then
+            echo "ERROR: Could not find previous deploy to rollback to."
+            exit 1
+          fi
+          echo "Rolling back to deploy: $PREVIOUS_DEPLOY"
+          curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$SERVICE_ID/deploys/$PREVIOUS_DEPLOY/resume" \
+            --fail \
+            --silent \
+            --show-error
+          echo "Rollback triggered successfully."
 
       - name: Send failure notification
         run: |

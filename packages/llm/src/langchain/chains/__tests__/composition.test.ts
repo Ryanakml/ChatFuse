@@ -45,6 +45,21 @@ describe('compositionChain - Structured Output & Fallbacks', () => {
     expect(result.intent).toBe('TOOL');
   });
 
+  it('should skip model invocation when composedResponse is already set', async () => {
+    const initialState: AgentState = {
+      originalInput: 'cek status pesanan 12345',
+      normalizedInput: 'cek status pesanan 12345',
+      route: 'tool_path',
+      intent: 'TOOL',
+      composedResponse: 'Tool response already prepared',
+    };
+
+    const result = await compositionChain.invoke(initialState);
+
+    expect(mockRouterInvoke).not.toHaveBeenCalled();
+    expect(result.composedResponse).toBe('Tool response already prepared');
+  });
+
   it('should escalate when escalate_flag is true', async () => {
     mockRouterInvoke.mockResolvedValueOnce({
       content: 'I need to transfer you to an agent.',
@@ -66,9 +81,35 @@ describe('compositionChain - Structured Output & Fallbacks', () => {
     expect(result.composedResponse).toBe('I need to transfer you to an agent.');
   });
 
-  it('should use the ultimate safe fallback when the model or parsing fails entirely', async () => {
-    // Simulate model throwing an error (e.g. both primary and fallback failed to parse)
-    mockRouterInvoke.mockRejectedValueOnce(new Error('OutputParserException: Could not parse'));
+  it('should retry with fallback provider when primary provider is rate-limited', async () => {
+    mockRouterInvoke
+      .mockRejectedValueOnce(new Error('OpenAI 429 rate limit exceeded'))
+      .mockResolvedValueOnce({
+        content: 'Fallback provider answer',
+        confidence: 0.88,
+        escalate_flag: false,
+      });
+
+    const initialState: AgentState = {
+      originalInput: 'apa kebijakan return?',
+      normalizedInput: 'apa kebijakan return?',
+      route: 'rag_path',
+      intent: 'RAG',
+      retrievedContext: 'Return policy context',
+      citations: [],
+    };
+
+    const result = await compositionChain.invoke(initialState);
+
+    expect(mockRouterInvoke).toHaveBeenCalledTimes(2);
+    expect(result.composedResponse).toBe('Fallback provider answer');
+    expect(result.intent).toBe('RAG');
+  });
+
+  it('should use the ultimate safe fallback when both providers fail', async () => {
+    mockRouterInvoke
+      .mockRejectedValueOnce(new Error('OpenAI 429 rate limit exceeded'))
+      .mockRejectedValueOnce(new Error('Gemini unavailable'));
 
     const initialState: AgentState = {
       originalInput: 'trigger failure',
@@ -81,7 +122,7 @@ describe('compositionChain - Structured Output & Fallbacks', () => {
 
     const result = await compositionChain.invoke(initialState);
 
-    expect(mockRouterInvoke).toHaveBeenCalledTimes(1);
+    expect(mockRouterInvoke).toHaveBeenCalledTimes(2);
 
     // Ultimate Safe Fallback assertions
     expect(result.composedResponse).toBe('System have some trouble.');

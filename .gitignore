@@ -40,3 +40,4 @@ yarn-error.log*
 !README.md
 /docs
 *.txt
+*.tsbuildinfo

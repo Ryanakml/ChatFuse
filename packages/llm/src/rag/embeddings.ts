@@ -2,6 +2,31 @@ import { Embeddings } from '@langchain/core/embeddings';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
 
+const VECTOR_DIMENSION_TARGET = 1536;
+
+/**
+ * Lifts or trims vectors to a fixed size expected by the current pgvector schema.
+ * This keeps fallback providers usable even when native dimensions differ.
+ */
+export function adaptVectorDimensions(
+  vector: number[],
+  targetDimension: number = VECTOR_DIMENSION_TARGET,
+): number[] {
+  if (vector.length === targetDimension) {
+    return vector;
+  }
+
+  if (vector.length === 0) {
+    return Array.from({ length: targetDimension }, () => 0);
+  }
+
+  if (vector.length > targetDimension) {
+    return vector.slice(0, targetDimension);
+  }
+
+  return [...vector, ...Array.from({ length: targetDimension - vector.length }, () => 0)];
+}
+
 /**
  * Creates an Embedding instance that uses OpenAI primarily,
  * and falls back to Gemini if OpenAI fails.
@@ -14,39 +39,46 @@ export class PrimaryFallbackEmbeddings extends Embeddings {
     super({});
     this.primary = new OpenAIEmbeddings({
       modelName: 'text-embedding-3-small', // Dimensions: 1536
-      dimensions: 1536,
+      dimensions: VECTOR_DIMENSION_TARGET,
     });
     this.fallback = new GoogleGenerativeAIEmbeddings({
-      modelName: 'text-embedding-004', // Output dimensions 768. Wait Supabase schema uses vector(1536).
-      // We must mock or handle dimension mismatch if fallback fails. For now, Google models only do 768 natively.
-      // Easiest is to stick to 1536 dimension required by schema.
-      // If we *must* support fallback and maintain 1536, we either zero-pad Gemini or stick to OpenAI w/ standard retries.
-      // Let's implement basic fallback and log errors. If dimensions mismatch, db will reject it.
-      // We will stick to OpenAI exclusively since pgvector assumes 1536, and Google is 768.
+      modelName: 'gemini-embedding-001',
     });
   }
 
   async embedDocuments(texts: string[]): Promise<number[][]> {
     try {
       return await this.primary.embedDocuments(texts);
-    } catch (error) {
-      console.warn(
-        'OpenAI embeddings failed, attempting fallback is unsupported due to dimension mismatch. Throwing original error.',
-        error,
-      );
-      throw error;
+    } catch (primaryError) {
+      try {
+        const fallbackVectors = await this.fallback.embedDocuments(texts);
+        return fallbackVectors.map((vector) =>
+          adaptVectorDimensions(vector, VECTOR_DIMENSION_TARGET),
+        );
+      } catch (fallbackError) {
+        console.warn('OpenAI and fallback embeddings both failed.', {
+          primaryError,
+          fallbackError,
+        });
+        throw primaryError;
+      }
     }
   }
 
   async embedQuery(text: string): Promise<number[]> {
     try {
       return await this.primary.embedQuery(text);
-    } catch (error) {
-      console.warn(
-        'OpenAI embeddings failed, attempting fallback is unsupported due to dimension mismatch. Throwing original error.',
-        error,
-      );
-      throw error;
+    } catch (primaryError) {
+      try {
+        const fallbackVector = await this.fallback.embedQuery(text);
+        return adaptVectorDimensions(fallbackVector, VECTOR_DIMENSION_TARGET);
+      } catch (fallbackError) {
+        console.warn('OpenAI and fallback embeddings both failed.', {
+          primaryError,
+          fallbackError,
+        });
+        throw primaryError;
+      }
     }
   }
 }

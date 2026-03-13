@@ -1,5 +1,5 @@
 /**
- * E2E Test: Provider Fallback Path (L2 – E2E)
+ * Integration Test: Provider Fallback Path (L2)
  *
  * Verifies that when the primary LLM provider (OpenAI) fails, the model router
  * falls back to Gemini and the pipeline still returns a valid AgentState.
@@ -61,7 +61,7 @@ import { processMessage } from '../pipeline.js';
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('E2E: Provider Fallback Path (L2 – E2E)', () => {
+describe('Integration: Provider Fallback Path (L2)', () => {
   beforeEach(() => {
     providerCallLog.length = 0;
   });
