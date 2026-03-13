@@ -17,9 +17,10 @@ export async function fetchKPIs(): Promise<OpsDashboardKPIs | null> {
   const supabase = await createClient();
   const {
     data: { session },
+    error,
   } = await supabase.auth.getSession();
 
-  if (!session?.access_token) {
+  if (error || !session?.access_token) {
     return null;
   }
 
