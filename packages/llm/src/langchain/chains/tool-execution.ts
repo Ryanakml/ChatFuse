@@ -1,7 +1,9 @@
 import { RunnableLambda } from '@langchain/core/runnables';
 import type { StructuredToolInterface } from '@langchain/core/tools';
+import { appMetrics, logger } from '@wa-chat/shared';
 import { businessTools } from '../../tools/index.js';
 import type { AgentState } from '../types.js';
+import { classifyToolWithGroq, type RoutedToolName } from './groq-classifier.js';
 
 const SAFE_TOOL_FAILURE_RESPONSE =
   'Maaf, saya belum bisa menjalankan permintaan itu saat ini. Silakan coba lagi atau minta bantuan agen manusia.';
@@ -13,6 +15,8 @@ type ToolSelection = {
   toolName: string;
   toolInput: Record<string, unknown>;
 };
+
+type ClassifiedToolName = Exclude<RoutedToolName, 'none'>;
 
 const extractOrderId = (text: string): string => {
   const match = text.match(/\b(?:ord[-\s]?)?(\d{3,})\b/i);
@@ -76,6 +80,95 @@ const detectToolFromInput = (normalizedInput: string): ToolSelection | null => {
   return null;
 };
 
+const buildToolInput = (
+  toolName: ClassifiedToolName,
+  normalizedInput: string,
+): Record<string, unknown> => {
+  if (toolName === 'order_status_lookup') {
+    return {
+      orderId: extractOrderId(normalizedInput),
+      customerEmail: 'customer@example.com',
+    };
+  }
+
+  if (toolName === 'product_information') {
+    return {
+      query: normalizedInput,
+    };
+  }
+
+  if (toolName === 'shipping_estimate') {
+    return {
+      destinationZipCode: '10110',
+      destinationCountry: 'ID',
+      weightKg: 1,
+    };
+  }
+
+  if (toolName === 'support_ticket_creation') {
+    return {
+      issueDescription: normalizedInput,
+      category: 'general',
+      priority: 'medium',
+      confirmed: false,
+    };
+  }
+
+  return {
+    reason: normalizedInput,
+  };
+};
+
+const classifyToolSelection = async (
+  normalizedInput: string,
+): Promise<{ selection: ToolSelection | null; source: 'GROQ' | 'FALLBACK' }> => {
+  try {
+    const classified = await classifyToolWithGroq(normalizedInput);
+    logger.debug(
+      {
+        classificationSource: 'GROQ',
+        toolName: classified.toolName,
+        confidence: classified.confidence,
+      },
+      'Tool selection completed',
+    );
+
+    if (classified.toolName === 'none') {
+      return {
+        selection: null,
+        source: 'GROQ',
+      };
+    }
+
+    return {
+      selection: {
+        toolName: classified.toolName,
+        toolInput: buildToolInput(classified.toolName, normalizedInput),
+      },
+      source: 'GROQ',
+    };
+  } catch (error) {
+    const fallback = detectToolFromInput(normalizedInput);
+    appMetrics.agentParseFailureCount?.add?.(1, {
+      stage: 'tool_selection',
+      source: 'fallback',
+    });
+    logger.warn(
+      {
+        error,
+        classificationSource: 'FALLBACK',
+        toolName: fallback?.toolName ?? null,
+      },
+      'Groq tool selection failed, fallback used',
+    );
+
+    return {
+      selection: fallback,
+      source: 'FALLBACK',
+    };
+  }
+};
+
 /**
  * Step 6: Tool execution chain.
  * For POC, tools still return mock outputs from the tool definitions and are safe to wire end-to-end.
@@ -86,7 +179,7 @@ export const toolExecutionChain = RunnableLambda.from(async (state: AgentState) 
   }
 
   const normalizedInput = state.normalizedInput || '';
-  const detectedTool = detectToolFromInput(normalizedInput);
+  const { selection: detectedTool } = await classifyToolSelection(normalizedInput);
 
   if (!detectedTool) {
     return {
