@@ -20,6 +20,9 @@ const parsePositiveInteger = (value: unknown): number | undefined => {
   return Math.floor(parsed);
 };
 
+const isUuid = (value: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
 const handleRepositoryError = (res: Response, error: unknown, fallbackMessage: string) => {
   if (isDatabaseUnavailableError(error)) {
     res.status(503).json({ error: 'Database unavailable' });
@@ -56,6 +59,10 @@ conversationsRouter.get('/escalations', async (req, res) => {
 
 conversationsRouter.get('/:id/timeline', async (req, res) => {
   try {
+    if (!isUuid(req.params.id)) {
+      res.status(400).json({ error: 'Invalid conversation id' });
+      return;
+    }
     const timeline = await conversationRepository.getConversationTimeline(req.params.id);
     res.json(timeline);
   } catch (error) {

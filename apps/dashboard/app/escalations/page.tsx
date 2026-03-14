@@ -1,24 +1,36 @@
 import type { ConversationSummary } from '@wa-chat/shared';
+import { createClient } from '@/lib/supabase/server';
 import { EscalationRow } from './EscalationRow';
 
 export const dynamic = 'force-dynamic';
 
 async function getEscalations(): Promise<ConversationSummary[]> {
   try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const supabase = await createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return [];
+    }
+
+    const apiUrl =
+      process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    console.log('API URL:', process.env.NEXT_PUBLIC_API_URL);
+    console.log('Fetching escalations...');
     const res = await fetch(`${apiUrl}/api/conversations/escalations`, {
       headers: {
-        'x-wa-user': 'ops-admin',
-        'x-wa-role': 'admin',
+        Authorization: `Bearer ${session.access_token}`,
       },
       cache: 'no-store',
     });
+    console.log('Response status:', res.status);
     if (!res.ok) {
       throw new Error(`API error: ${res.status}`);
     }
     return res.json();
   } catch (error) {
-    console.error('Failed to fetch escalations:', error);
+    console.error('Error:', error);
     return [];
   }
 }
