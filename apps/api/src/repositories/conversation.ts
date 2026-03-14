@@ -124,7 +124,9 @@ const compareByMostRecentMessage = (left: ConversationSummary, right: Conversati
   new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime();
 
 const compareBySlaThenRecency = (left: ConversationSummary, right: ConversationSummary) => {
-  const leftSla = left.slaBreachAt ? new Date(left.slaBreachAt).getTime() : Number.POSITIVE_INFINITY;
+  const leftSla = left.slaBreachAt
+    ? new Date(left.slaBreachAt).getTime()
+    : Number.POSITIVE_INFINITY;
   const rightSla = right.slaBreachAt
     ? new Date(right.slaBreachAt).getTime()
     : Number.POSITIVE_INFINITY;
@@ -201,7 +203,9 @@ export class ConversationRepository {
     }
   }
 
-  private async getLastMessageByConversation(conversationIds: string[]): Promise<Map<string, string>> {
+  private async getLastMessageByConversation(
+    conversationIds: string[],
+  ): Promise<Map<string, string>> {
     const latestMessageAt = new Map<string, string>();
     if (conversationIds.length === 0) {
       return latestMessageAt;
@@ -254,7 +258,9 @@ export class ConversationRepository {
     });
   }
 
-  async listActiveConversations(options: ConversationListOptions = {}): Promise<ConversationSummary[]> {
+  async listActiveConversations(
+    options: ConversationListOptions = {},
+  ): Promise<ConversationSummary[]> {
     const page = normalizePage(options.page);
     const pageSize = normalizePageSize(options.pageSize);
     const rows = await this.listConversationRows({
@@ -296,33 +302,33 @@ export class ConversationRepository {
         throw toRepositoryError(eventResult.error, 'load conversation events');
       }
 
-      const messageItems: ConversationTimelineItem[] = ((messageResult.data ?? []) as MessageRow[]).map(
-        (message) => ({
-          type: 'message',
-          id: message.id,
-          conversationId: message.conversation_id,
-          senderRole: mapSenderRole(message.direction, message.sender_type),
-          content: message.body,
-          createdAt: message.created_at,
-        }),
-      );
+      const messageItems: ConversationTimelineItem[] = (
+        (messageResult.data ?? []) as MessageRow[]
+      ).map((message) => ({
+        type: 'message',
+        id: message.id,
+        conversationId: message.conversation_id,
+        senderRole: mapSenderRole(message.direction, message.sender_type),
+        content: message.body,
+        createdAt: message.created_at,
+      }));
 
-      const eventItems: ConversationTimelineItem[] = ((eventResult.data ?? []) as AgentEventRow[]).map(
-        (event) => {
-          const payload = isRecord(event.payload) ? event.payload : {};
-          return {
-            type: 'event',
-            id: event.id,
-            conversationId: event.conversation_id,
-            eventType: mapEventType(event.event_type, payload),
-            details: {
-              sourceEventType: event.event_type,
-              ...payload,
-            },
-            createdAt: event.created_at,
-          };
-        },
-      );
+      const eventItems: ConversationTimelineItem[] = (
+        (eventResult.data ?? []) as AgentEventRow[]
+      ).map((event) => {
+        const payload = isRecord(event.payload) ? event.payload : {};
+        return {
+          type: 'event',
+          id: event.id,
+          conversationId: event.conversation_id,
+          eventType: mapEventType(event.event_type, payload),
+          details: {
+            sourceEventType: event.event_type,
+            ...payload,
+          },
+          createdAt: event.created_at,
+        };
+      });
 
       return [...messageItems, ...eventItems].sort(
         (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
