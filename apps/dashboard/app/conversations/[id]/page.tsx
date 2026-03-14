@@ -1,25 +1,64 @@
 import { ConversationTimelineItem, ConversationSummary } from '@wa-chat/shared';
+import { createClient } from '@/lib/supabase/server';
 import { ConversationActions } from './ConversationActions';
 
-const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const apiUrl = process.env.API_URL;
+
+async function getAccessToken(): Promise<string | null> {
+  const supabase = await createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
 
 async function getTimeline(id: string): Promise<ConversationTimelineItem[]> {
-  const res = await fetch(`${apiUrl}/api/conversations/${id}/timeline`, {
-    headers: { 'x-wa-user': 'ops-admin', 'x-wa-role': 'admin' },
-    cache: 'no-store',
-  });
-  if (!res.ok) return [];
-  return res.json();
+  console.log('API URL:', process.env.API_URL);
+  console.log('Fetching conversation timeline...');
+  try {
+    if (!apiUrl) {
+      return [];
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      return [];
+    }
+    const res = await fetch(`${apiUrl}/api/conversations/${id}/timeline`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    console.log('Response status:', res.status);
+    if (!res.ok) return [];
+    return res.json();
+  } catch (error) {
+    console.error('Error:', error);
+    return [];
+  }
 }
 
 async function getSummary(id: string): Promise<ConversationSummary | null> {
-  const res = await fetch(`${apiUrl}/api/conversations`, {
-    headers: { 'x-wa-user': 'ops-admin', 'x-wa-role': 'admin' },
-    cache: 'no-store',
-  });
-  if (!res.ok) return null;
-  const list: ConversationSummary[] = await res.json();
-  return list.find((c) => c.id === id) || null;
+  console.log('API URL:', process.env.API_URL);
+  console.log('Fetching conversation summary...');
+  try {
+    if (!apiUrl) {
+      return null;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      return null;
+    }
+    const res = await fetch(`${apiUrl}/api/conversations`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    console.log('Response status:', res.status);
+    if (!res.ok) return null;
+    const list: ConversationSummary[] = await res.json();
+    return list.find((c) => c.id === id) || null;
+  } catch (error) {
+    console.error('Error:', error);
+    return null;
+  }
 }
 
 export default async function ConversationDetailPage({ params }: { params: { id: string } }) {
