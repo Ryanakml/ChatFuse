@@ -496,11 +496,13 @@ export const createApp = (runtimeEnv, options = {}) => {
         res.json({ ok: true });
     });
     // Example RBAC-protected endpoint implementation
-    app.post('/api/protected/admin-only', authenticateRequest, requireRole('admin'), (req, res) => {
-        res.json({ ok: true });
-    });
-    app.use('/api/conversations', conversationsRouter);
-    app.use('/api/kpis', kpisRouter);
+app.post('/api/protected/admin-only', authenticateRequest, requireRole('admin'), (req, res) => {
+    res.json({ ok: true });
+});
+// Parse JSON for API endpoints; webhook uses a dedicated parser to preserve raw body for signature checks.
+app.use('/api', express.json());
+app.use('/api/conversations', conversationsRouter);
+app.use('/api/kpis', kpisRouter);
     // --- L1: Admin security routes ---
     /**
      * DELETE /api/admin/users/:userId

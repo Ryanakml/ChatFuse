@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import type { FormEvent } from 'react';
 import { takeoverConversation, returnToBot, sendMessage } from '../actions';
 
 interface ConversationActionsProps {
@@ -32,6 +33,22 @@ export function ConversationActions({ conversationId, botActive }: ConversationA
     });
   };
 
+  const handleSendMessage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+
+    startTransition(async () => {
+      setActionError(null);
+      const formData = new FormData(form);
+      const result = await sendMessage(conversationId, formData);
+      if (!result.success) {
+        setActionError(result.error ?? 'Failed to send message');
+        return;
+      }
+      form.reset();
+    });
+  };
+
   return (
     <div className="sticky bottom-0 mt-4 border-t border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div className="flex items-center gap-4 mb-4">
@@ -58,7 +75,7 @@ export function ConversationActions({ conversationId, botActive }: ConversationA
       {actionError && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{actionError}</p>}
 
       {!botActive && (
-        <form action={sendMessage.bind(null, conversationId)} className="flex items-end gap-2">
+        <form onSubmit={handleSendMessage} className="flex items-end gap-2">
           <div className="flex-1">
             <label htmlFor="content" className="sr-only">
               Message for user
@@ -73,6 +90,7 @@ export function ConversationActions({ conversationId, botActive }: ConversationA
           </div>
           <button
             type="submit"
+            disabled={isPending}
             className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm font-medium"
           >
             Send Manual Reply

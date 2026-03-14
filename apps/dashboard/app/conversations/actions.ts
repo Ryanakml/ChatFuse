@@ -72,10 +72,10 @@ export async function returnToBot(conversationId: string): Promise<ActionResult>
   }
 }
 
-export async function sendMessage(conversationId: string, formData: FormData): Promise<void> {
+export async function sendMessage(conversationId: string, formData: FormData): Promise<ActionResult> {
   const content = formData.get('content') as string;
   if (!content) {
-    return;
+    return { success: false, error: 'Message content required' };
   }
 
   try {
@@ -84,7 +84,10 @@ export async function sendMessage(conversationId: string, formData: FormData): P
       body: JSON.stringify({ content }),
     });
     revalidatePath(`/conversations/${conversationId}`);
+    return { success: true };
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to send message';
     console.error('sendMessage failed:', error);
+    return { success: false, error: message };
   }
 }
