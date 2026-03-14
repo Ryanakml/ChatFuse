@@ -84,6 +84,7 @@ conversationsRouter.post('/:id/takeover', async (req, res) => {
     await conversationRepository.takeoverConversation(req.params.id, operatorId);
     res.json({ success: true });
   } catch (error) {
+    console.error('Takeover error:', error);
     handleRepositoryError(res, error, 'Failed to take over conversation');
   }
 });
