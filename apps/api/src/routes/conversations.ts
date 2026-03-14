@@ -2,6 +2,7 @@ import { Router, type Response } from 'express';
 import { authenticateRequest, requireRole } from '../auth.js';
 import { conversationRepository } from '../repositories/conversation.js';
 import { isDatabaseUnavailableError } from '../repositories/errors.js';
+import { sendWhatsAppTextMessage } from '../services/whatsapp.js';
 
 export const conversationsRouter = Router();
 
@@ -109,15 +110,46 @@ conversationsRouter.post('/:id/return', async (req, res) => {
 conversationsRouter.post('/:id/messages', async (req, res) => {
   try {
     const operatorId = req.user?.id || 'unknown';
-    const { content } = req.body;
-    if (!content || typeof content !== 'string') {
+    const contentRaw = req.body?.content;
+    const content = typeof contentRaw === 'string' ? contentRaw.trim() : '';
+    if (!content) {
       res.status(400).json({ error: 'Message content required' });
       return;
     }
-    await conversationRepository.addOperatorMessage(req.params.id, operatorId, content);
 
-    // In a real app we would ALSO broadcast this out to WhatsApp here
-    res.json({ success: true });
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    if (!phoneNumberId || !accessToken) {
+      res.status(500).json({ error: 'WhatsApp outbound is not configured' });
+      return;
+    }
+
+    const recipientPhone = await conversationRepository.getConversationRecipientPhone(req.params.id);
+    const outboundResult = await sendWhatsAppTextMessage({
+      phoneNumberId,
+      accessToken,
+      to: recipientPhone,
+      text: content,
+    });
+
+    try {
+      await conversationRepository.addOperatorMessage(
+        req.params.id,
+        operatorId,
+        content,
+        outboundResult.messageId,
+      );
+    } catch (persistError) {
+      console.error('Manual outbound sent but failed to persist message:', persistError);
+      res.json({
+        success: true,
+        messageId: outboundResult.messageId,
+        persisted: false,
+      });
+      return;
+    }
+
+    res.json({ success: true, messageId: outboundResult.messageId, persisted: true });
   } catch (error) {
     handleRepositoryError(res, error, 'Failed to send message');
   }

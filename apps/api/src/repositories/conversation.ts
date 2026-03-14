@@ -410,6 +410,7 @@ export class ConversationRepository {
     conversationId: string,
     _operatorId: string,
     content: string,
+    whatsappMessageId?: string | null,
   ): Promise<void> {
     const client = getClient();
 
@@ -418,6 +419,7 @@ export class ConversationRepository {
         conversation_id: conversationId,
         direction: 'outbound',
         sender_type: 'agent',
+        whatsapp_message_id: whatsappMessageId ?? null,
         body: content,
       });
 
@@ -426,6 +428,46 @@ export class ConversationRepository {
       }
     } catch (error: unknown) {
       throw toRepositoryError(error, 'insert operator message');
+    }
+  }
+
+  async getConversationRecipientPhone(conversationId: string): Promise<string> {
+    const client = getClient();
+
+    try {
+      const { data: conversation, error: conversationError } = await client
+        .from('conversations')
+        .select('user_id')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      if (conversationError) {
+        throw toRepositoryError(conversationError, 'load conversation recipient');
+      }
+
+      const userId = conversation?.user_id as string | undefined;
+      if (!userId) {
+        throw new Error(`conversation not found: ${conversationId}`);
+      }
+
+      const { data: user, error: userError } = await client
+        .from('users')
+        .select('phone_number')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (userError) {
+        throw toRepositoryError(userError, 'load recipient phone');
+      }
+
+      const phoneNumber = user?.phone_number as string | undefined;
+      if (!phoneNumber || phoneNumber.trim() === '') {
+        throw new Error(`recipient phone number not found for user: ${userId}`);
+      }
+
+      return phoneNumber;
+    } catch (error: unknown) {
+      throw toRepositoryError(error, 'load conversation recipient phone');
     }
   }
 
