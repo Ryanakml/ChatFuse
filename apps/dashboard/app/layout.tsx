@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import Link from 'next/link';
+import { ThemeProvider } from '@/components/theme-provider';
+import { ThemeToggle } from '@/components/theme-toggle';
 import './globals.css';
 
 const geistSans = Geist({
@@ -24,28 +26,44 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <div className="flex items-center gap-6">
-          <Link
-            href="/"
-            className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent"
-          >
-            WA Chat Ops
-          </Link>
-          <nav className="flex items-center gap-4 text-sm font-medium">
-            <Link href="/" className="text-gray-600 hover:text-gray-900">
-              Dashboard
-            </Link>
-            <Link href="/conversations" className="text-gray-600 hover:text-gray-900">
-              Conversations
-            </Link>
-            <Link href="/escalations" className="text-gray-600 hover:text-gray-900">
-              Escalations
-            </Link>
-          </nav>
-        </div>
-        {children}
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} bg-background text-foreground antialiased`}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <header className="border-b border-gray-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/95">
+            <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
+              <div className="flex items-center gap-6">
+                <Link
+                  href="/"
+                  className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent"
+                >
+                  WA Chat Ops
+                </Link>
+                <nav className="flex items-center gap-4 text-sm font-medium">
+                  <Link
+                    href="/"
+                    className="text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                  >
+                    Dashboard
+                  </Link>
+                  <Link
+                    href="/conversations"
+                    className="text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                  >
+                    Conversations
+                  </Link>
+                  <Link
+                    href="/escalations"
+                    className="text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                  >
+                    Escalations
+                  </Link>
+                </nav>
+              </div>
+              <ThemeToggle />
+            </div>
+          </header>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -38,34 +38,34 @@ export default function LoginPageClient() {
   return (
     <form onSubmit={handleLogin} className="space-y-4">
       {errorMsg && (
-        <div className="bg-red-50 text-red-600 p-3 rounded border border-red-200 text-sm">
+        <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           {errorMsg}
         </div>
       )}
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="email">
+        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="email">
           Email
         </label>
         <input
           id="email"
           type="email"
           required
-          className="w-full p-2 border border-gray-300 rounded focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+          className="w-full rounded border border-gray-300 bg-white p-2 text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-400"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="password">
+        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="password">
           Password
         </label>
         <input
           id="password"
           type="password"
           required
-          className="w-full p-2 border border-gray-300 rounded focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+          className="w-full rounded border border-gray-300 bg-white p-2 text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-400"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />

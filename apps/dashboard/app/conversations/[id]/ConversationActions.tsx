@@ -24,9 +24,9 @@ export function ConversationActions({ conversationId, botActive }: ConversationA
   };
 
   return (
-    <div className="bg-white p-4 shadow-sm border-t mt-4 sticky bottom-0">
+    <div className="sticky bottom-0 mt-4 border-t border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div className="flex items-center gap-4 mb-4">
-        <span className="text-sm font-medium text-gray-700">Actions:</span>
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Actions:</span>
         {botActive ? (
           <button
             onClick={handleTakeover}
@@ -57,7 +57,7 @@ export function ConversationActions({ conversationId, botActive }: ConversationA
               name="content"
               rows={2}
               placeholder="Type your response to the user..."
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2"
+              className="w-full rounded-md border border-gray-300 bg-white p-2 text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-400 sm:text-sm"
             />
           </div>
           <button
