@@ -79,8 +79,8 @@ conversationsRouter.get('/:id/timeline', async (req, res) => {
 
 conversationsRouter.post('/:id/takeover', async (req, res) => {
   try {
-    // Note: in a real app, operatorId comes from the authenticated x-wa-user header
-    const operatorId = req.header('x-wa-user') || 'unknown';
+    // operatorId comes from the authenticated JWT token via authenticateRequest middleware
+    const operatorId = req.user?.id || 'unknown';
     await conversationRepository.takeoverConversation(req.params.id, operatorId);
     res.json({ success: true });
   } catch (error) {
@@ -91,7 +91,7 @@ conversationsRouter.post('/:id/takeover', async (req, res) => {
 
 conversationsRouter.post('/:id/return', async (req, res) => {
   try {
-    const operatorId = req.header('x-wa-user') || 'unknown';
+    const operatorId = req.user?.id || 'unknown';
     await conversationRepository.returnToBot(req.params.id, operatorId);
     res.json({ success: true });
   } catch (error) {
@@ -101,7 +101,7 @@ conversationsRouter.post('/:id/return', async (req, res) => {
 
 conversationsRouter.post('/:id/messages', async (req, res) => {
   try {
-    const operatorId = req.header('x-wa-user') || 'unknown';
+    const operatorId = req.user?.id || 'unknown';
     const { content } = req.body;
     if (!content || typeof content !== 'string') {
       res.status(400).json({ error: 'Message content required' });
