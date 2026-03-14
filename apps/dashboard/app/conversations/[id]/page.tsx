@@ -63,9 +63,14 @@ async function getSummary(id: string): Promise<ConversationSummary | null> {
   }
 }
 
-export default async function ConversationDetailPage({ params }: { params: { id: string } }) {
-  const summary = await getSummary(params.id);
-  const timeline = await getTimeline(params.id);
+export default async function ConversationDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const summary = await getSummary(id);
+  const timeline = await getTimeline(id);
 
   if (!summary) {
     return <div className="p-8 text-center text-red-500">Conversation not found</div>;
