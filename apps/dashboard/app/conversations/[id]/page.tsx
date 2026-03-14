@@ -1,8 +1,10 @@
 import { ConversationTimelineItem, ConversationSummary } from '@wa-chat/shared';
 import { ConversationActions } from './ConversationActions';
 
+const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 async function getTimeline(id: string): Promise<ConversationTimelineItem[]> {
-  const res = await fetch(`http://localhost:3001/api/conversations/${id}/timeline`, {
+  const res = await fetch(`${apiUrl}/api/conversations/${id}/timeline`, {
     headers: { 'x-wa-user': 'ops-admin', 'x-wa-role': 'admin' },
     cache: 'no-store',
   });
@@ -11,7 +13,7 @@ async function getTimeline(id: string): Promise<ConversationTimelineItem[]> {
 }
 
 async function getSummary(id: string): Promise<ConversationSummary | null> {
-  const res = await fetch(`http://localhost:3001/api/conversations`, {
+  const res = await fetch(`${apiUrl}/api/conversations`, {
     headers: { 'x-wa-user': 'ops-admin', 'x-wa-role': 'admin' },
     cache: 'no-store',
   });

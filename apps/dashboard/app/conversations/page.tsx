@@ -1,5 +1,6 @@
 import type { ConversationSummary } from '@wa-chat/shared';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,12 +8,19 @@ export const dynamic = 'force-dynamic';
 // For now, this queries the local api server on port 3001
 async function getConversations(): Promise<ConversationSummary[]> {
   try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    // Requires support_agent role, we'll mock the headers here for dashboard SSR
+    const supabase = await createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return [];
+    }
+
+    const apiUrl =
+      process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     const res = await fetch(`${apiUrl}/api/conversations`, {
       headers: {
-        'x-wa-user': 'ops-admin',
-        'x-wa-role': 'admin',
+        Authorization: `Bearer ${session.access_token}`,
       },
       cache: 'no-store',
     });
