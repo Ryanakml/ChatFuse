@@ -60,11 +60,16 @@ conversationsRouter.get('/escalations', async (req, res) => {
 
 conversationsRouter.get('/:id/timeline', async (req, res) => {
   try {
-    if (!isUuid(req.params.id)) {
-      res.status(400).json({ error: 'Invalid conversation id' });
+    const conversationId = req.params.id;
+    console.log('Timeline request received - ID:', conversationId);
+    console.log('Is valid UUID:', isUuid(conversationId));
+    if (!isUuid(conversationId)) {
+      console.error('Invalid UUID format:', conversationId);
+      res.status(400).json({ error: `Invalid conversation id: ${conversationId}` });
       return;
     }
-    const timeline = await conversationRepository.getConversationTimeline(req.params.id);
+    const timeline = await conversationRepository.getConversationTimeline(conversationId);
+    console.log('Timeline fetched successfully, items:', timeline.length);
     res.json(timeline);
   } catch (error) {
     console.error('Timeline error:', error);

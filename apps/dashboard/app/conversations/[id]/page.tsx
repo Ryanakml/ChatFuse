@@ -23,7 +23,9 @@ async function getTimeline(id: string): Promise<ConversationTimelineItem[]> {
     if (!token) {
       return [];
     }
-    const res = await fetch(`${apiUrl}/api/conversations/${id}/timeline`, {
+    const timelineUrl = `${apiUrl}/api/conversations/${id}/timeline`;
+    console.log('Timeline URL:', timelineUrl);
+    const res = await fetch(timelineUrl, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     });
