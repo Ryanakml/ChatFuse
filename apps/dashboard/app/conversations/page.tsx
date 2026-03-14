@@ -18,18 +18,21 @@ async function getConversations(): Promise<ConversationSummary[]> {
 
     const apiUrl =
       process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    console.log('API URL:', process.env.NEXT_PUBLIC_API_URL);
+    console.log('Fetching conversations...');
     const res = await fetch(`${apiUrl}/api/conversations`, {
       headers: {
         Authorization: `Bearer ${session.access_token}`,
       },
       cache: 'no-store',
     });
+    console.log('Response status:', res.status);
     if (!res.ok) {
       throw new Error(`API error: ${res.status}`);
     }
     return res.json();
   } catch (error) {
-    console.error('Failed to fetch conversations:', error);
+    console.error('Error:', error);
     return [];
   }
 }
