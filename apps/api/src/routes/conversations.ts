@@ -53,6 +53,7 @@ conversationsRouter.get('/escalations', async (req, res) => {
     const list = await conversationRepository.listUnresolvedConversations();
     res.json(list);
   } catch (error) {
+    console.error('Escalations error:', error);
     handleRepositoryError(res, error, 'Failed to fetch escalations');
   }
 });
@@ -66,6 +67,7 @@ conversationsRouter.get('/:id/timeline', async (req, res) => {
     const timeline = await conversationRepository.getConversationTimeline(req.params.id);
     res.json(timeline);
   } catch (error) {
+    console.error('Timeline error:', error);
     handleRepositoryError(res, error, 'Failed to fetch timeline');
   }
 });

@@ -275,18 +275,19 @@ export class ConversationRepository {
     const client = getClient();
 
     try {
-      const [messageResult, eventResult] = await Promise.all([
-        client
-          .from('messages')
-          .select('id, conversation_id, direction, sender_type, body, created_at')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true }),
-        client
-          .from('agent_events')
-          .select('id, conversation_id, event_type, payload, created_at')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true }),
-      ]);
+      const messageQuery = client
+        .from('messages')
+        .select('id, conversation_id, direction, sender_type, body, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      const eventQuery = client
+        .from('agent_events')
+        .select('id, conversation_id, event_type, payload, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      const [messageResult, eventResult] = await Promise.all([messageQuery, eventQuery]);
 
       if (messageResult.error) {
         throw toRepositoryError(messageResult.error, 'load conversation messages');
