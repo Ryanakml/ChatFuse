@@ -23,12 +23,19 @@ const parsePositiveInteger = (value: unknown): number | undefined => {
 const isUuid = (value: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
+const getErrorDetails = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+};
+
 const handleRepositoryError = (res: Response, error: unknown, fallbackMessage: string) => {
   if (isDatabaseUnavailableError(error)) {
     res.status(503).json({ error: 'Database unavailable' });
     return;
   }
-  res.status(500).json({ error: fallbackMessage });
+  res.status(500).json({ error: fallbackMessage, details: getErrorDetails(error) });
 };
 
 conversationsRouter.get('/', async (req, res) => {

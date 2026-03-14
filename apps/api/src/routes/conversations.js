@@ -39,8 +39,11 @@ conversationsRouter.post('/:id/takeover', async (req, res) => {
         await conversationRepository.takeoverConversation(req.params.id, operatorId);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to take over conversation' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to take over conversation',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/return', async (req, res) => {
@@ -49,8 +52,11 @@ conversationsRouter.post('/:id/return', async (req, res) => {
         await conversationRepository.returnToBot(req.params.id, operatorId);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to return conversation to bot' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to return conversation to bot',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/messages', async (req, res) => {
@@ -65,8 +71,11 @@ conversationsRouter.post('/:id/messages', async (req, res) => {
         // In a real app we would ALSO broadcast this out to WhatsApp here
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to send message' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to send message',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/assign', async (req, res) => {
@@ -75,8 +84,11 @@ conversationsRouter.post('/:id/assign', async (req, res) => {
         await conversationRepository.assignConversationOwner(req.params.id, operatorId ?? null);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to assign conversation' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to assign conversation',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/status', async (req, res) => {
@@ -89,8 +101,11 @@ conversationsRouter.post('/:id/status', async (req, res) => {
         await conversationRepository.updateEscalationStatus(req.params.id, status);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to update conversation status' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to update conversation status',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 //# sourceMappingURL=conversations.js.map
