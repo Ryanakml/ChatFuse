@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { takeoverConversation, returnToBot, sendMessage } from '../actions';
 
 interface ConversationActionsProps {
@@ -10,16 +10,25 @@ interface ConversationActionsProps {
 
 export function ConversationActions({ conversationId, botActive }: ConversationActionsProps) {
   const [isPending, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleTakeover = () => {
     startTransition(async () => {
-      await takeoverConversation(conversationId);
+      setActionError(null);
+      const result = await takeoverConversation(conversationId);
+      if (!result.success) {
+        setActionError(result.error ?? 'Failed to take over conversation');
+      }
     });
   };
 
   const handleReturn = () => {
     startTransition(async () => {
-      await returnToBot(conversationId);
+      setActionError(null);
+      const result = await returnToBot(conversationId);
+      if (!result.success) {
+        setActionError(result.error ?? 'Failed to return conversation to bot');
+      }
     });
   };
 
@@ -45,6 +54,8 @@ export function ConversationActions({ conversationId, botActive }: ConversationA
           </button>
         )}
       </div>
+
+      {actionError && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{actionError}</p>}
 
       {!botActive && (
         <form action={sendMessage.bind(null, conversationId)} className="flex items-end gap-2">
