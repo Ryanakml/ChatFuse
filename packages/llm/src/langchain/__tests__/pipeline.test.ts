@@ -19,10 +19,21 @@ vi.mock('../../router/model-router.js', () => {
       RunnableLambda.from(async (promptValue: any) => {
         const text = promptValue?.toString() || '';
         let content = '';
-        if (text.includes('rag_path')) content = '[RAG RESPONSE]';
-        else if (text.includes('tool_path')) content = '[TOOL RESPONSE]';
-        else if (text.includes('escalation_path')) content = '[ESCALATION RESPONSE]';
-        else content = 'inappropriate'; // default fallback for clarify test
+
+        // The composition prompt now includes routing rules in the SYSTEM message
+        // that mention "rag_path" regardless of the actual route. To avoid those
+        // false positives, key off the explicit "Routing Decision: <route>" line
+        // from the human message template instead of generic substring matches.
+        if (text.includes('Routing Decision: escalation_path')) {
+          content = '[ESCALATION RESPONSE]';
+        } else if (text.includes('Routing Decision: rag_path')) {
+          content = '[RAG RESPONSE]';
+        } else if (text.includes('Routing Decision: tool_path')) {
+          content = '[TOOL RESPONSE]';
+        } else {
+          // default fallback for clarify / other tests
+          content = 'inappropriate';
+        }
 
         return {
           content,
