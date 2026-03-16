@@ -2,9 +2,9 @@ import OpenAI from 'openai';
 
 const DEFAULT_GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile';
-const DEFAULT_GROQ_ROUTER_TIMEOUT_MS = 2000;
+const DEFAULT_GROQ_ROUTER_TIMEOUT_MS = 5000;
 
-const INTENT_VALUES = ['RAG', 'TOOL', 'ESCALATION', 'CLARIFICATION'] as const;
+const INTENT_VALUES = ['RAG', 'TOOL', 'ESCALATION', 'CLARIFICATION', 'GREETING'] as const;
 export type RoutedIntent = (typeof INTENT_VALUES)[number];
 const TOOL_NAME_VALUES = [
   'order_status_lookup',
@@ -37,12 +37,25 @@ const policyActionSet = new Set<RoutedPolicyAction>(POLICY_ACTION_VALUES);
 
 const INTENT_ROUTER_SYSTEM_PROMPT = `You are a routing classifier for a WhatsApp customer support assistant.
 Return ONLY a JSON object with keys: intent, confidence.
-Valid intents: RAG, TOOL, ESCALATION, CLARIFICATION.
+Valid intents: RAG, TOOL, ESCALATION, CLARIFICATION, GREETING.
 
-- RAG: policy, FAQ, product info, how-to, general questions.
-- TOOL: order status lookup, shipping estimate, product search, ticket creation.
-- ESCALATION: explicit request for a human/agent/manager or complaints needing handoff.
-- CLARIFICATION: ambiguous, low-signal, or missing key details.
+- RAG: questions about policy, FAQ, product info, shipping info, return/refund/exchange, how-to, general knowledge questions. Use RAG when the user is asking for information that could be answered from a knowledge base.
+- TOOL: actions requiring live data lookup — order status, shipping estimate, product search, ticket creation. Use TOOL when the user wants to DO something or CHECK something specific.
+- ESCALATION: user explicitly asks for a human, agent, manager, or CS. Only use this when unambiguous.
+- CLARIFICATION: genuinely ambiguous input where intent cannot be determined at all. Only use CLARIFICATION with high confidence for truly meaningless input.
+- GREETING: casual openers, greetings, basa-basi with no specific request. Examples: halo, hi, hey, yoo, selamat pagi, assalamualaikum, good morning
+
+Examples:
+- "what is the return policy?" → {"intent": "RAG", "confidence": 0.95}
+- "i want to return the product" → {"intent": "RAG", "confidence": 0.9}
+- "how much is shipping to jakarta?" → {"intent": "RAG", "confidence": 0.85}
+- "check order 12345" → {"intent": "TOOL", "confidence": 0.95}
+- "where is my order?" → {"intent": "TOOL", "confidence": 0.9}
+- "please connect me to a human" → {"intent": "ESCALATION", "confidence": 0.95}
+- "halo" → {"intent": "GREETING", "confidence": 0.95}
+- "yoo" → {"intent": "GREETING", "confidence": 0.95}
+- "xyz lorem ipsum" → {"intent": "CLARIFICATION", "confidence": 0.95}
+
 Do not include any extra text, markdown, or explanations. Output must be valid JSON.`;
 
 const TOOL_SELECTION_SYSTEM_PROMPT = `You are a tool selector for a WhatsApp support agent.
