@@ -17,14 +17,22 @@ export async function fetchKPIs(): Promise<OpsDashboardKPIs | null> {
   const supabase = await createClient();
   const {
     data: { session },
+    error,
   } = await supabase.auth.getSession();
 
-  if (!session?.access_token) {
+  console.log('Session error:', error);
+  console.log('Has session:', !!session);
+  console.log('Has token:', !!session?.access_token);
+  console.log('API URL:', process.env.API_URL);
+
+  if (error || !session?.access_token) {
+    console.log('Early return — no session');
     return null;
   }
 
   const apiUrl = process.env.API_URL || 'http://localhost:3000';
   try {
+    console.log('Fetching KPIs from:', `${apiUrl}/api/kpis`);
     const response = await fetch(`${apiUrl}/api/kpis`, {
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -32,7 +40,9 @@ export async function fetchKPIs(): Promise<OpsDashboardKPIs | null> {
       next: { revalidate: 10 },
     });
 
+    console.log('KPI Response status:', response.status);
     if (!response.ok) {
+      console.log('KPI Response not ok:', await response.text());
       return null;
     }
 

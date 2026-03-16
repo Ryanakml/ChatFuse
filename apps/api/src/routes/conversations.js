@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticateRequest, requireRole } from '../auth.js';
 import { conversationRepository } from '../repositories/conversation.js';
+import { sendWhatsAppTextMessage } from '../services/whatsapp.js';
 export const conversationsRouter = Router();
 // Require support_agent or admin role to access these
 conversationsRouter.use(authenticateRequest);
@@ -39,8 +40,11 @@ conversationsRouter.post('/:id/takeover', async (req, res) => {
         await conversationRepository.takeoverConversation(req.params.id, operatorId);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to take over conversation' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to take over conversation',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/return', async (req, res) => {
@@ -49,24 +53,54 @@ conversationsRouter.post('/:id/return', async (req, res) => {
         await conversationRepository.returnToBot(req.params.id, operatorId);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to return conversation to bot' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to return conversation to bot',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/messages', async (req, res) => {
     try {
-        const operatorId = req.header('x-wa-user') || 'unknown';
-        const { content } = req.body;
-        if (!content || typeof content !== 'string') {
+        const operatorId = req.user?.id || 'unknown';
+        const contentRaw = req.body?.content;
+        const content = typeof contentRaw === 'string' ? contentRaw.trim() : '';
+        if (!content) {
             res.status(400).json({ error: 'Message content required' });
             return;
         }
-        await conversationRepository.addOperatorMessage(req.params.id, operatorId, content);
-        // In a real app we would ALSO broadcast this out to WhatsApp here
-        res.json({ success: true });
+        const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+        const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+        if (!phoneNumberId || !accessToken) {
+            res.status(500).json({ error: 'WhatsApp outbound is not configured' });
+            return;
+        }
+        const recipientPhone = await conversationRepository.getConversationRecipientPhone(req.params.id);
+        const outboundResult = await sendWhatsAppTextMessage({
+            phoneNumberId,
+            accessToken,
+            to: recipientPhone,
+            text: content,
+        });
+        try {
+            await conversationRepository.addOperatorMessage(req.params.id, operatorId, content, outboundResult.messageId);
+        }
+        catch (persistError) {
+            console.error('Manual outbound sent but failed to persist message:', persistError);
+            res.json({
+                success: true,
+                messageId: outboundResult.messageId,
+                persisted: false,
+            });
+            return;
+        }
+        res.json({ success: true, messageId: outboundResult.messageId, persisted: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to send message' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to send message',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/assign', async (req, res) => {
@@ -75,8 +109,11 @@ conversationsRouter.post('/:id/assign', async (req, res) => {
         await conversationRepository.assignConversationOwner(req.params.id, operatorId ?? null);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to assign conversation' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to assign conversation',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 conversationsRouter.post('/:id/status', async (req, res) => {
@@ -89,8 +126,11 @@ conversationsRouter.post('/:id/status', async (req, res) => {
         await conversationRepository.updateEscalationStatus(req.params.id, status);
         res.json({ success: true });
     }
-    catch {
-        res.status(500).json({ error: 'Failed to update conversation status' });
+    catch (error) {
+        res.status(500).json({
+            error: 'Failed to update conversation status',
+            details: error instanceof Error ? error.message : String(error),
+        });
     }
 });
 //# sourceMappingURL=conversations.js.map

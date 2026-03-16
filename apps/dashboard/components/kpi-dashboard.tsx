@@ -7,7 +7,7 @@ export async function KpiDashboard() {
 
   if (!kpis) {
     return (
-      <div className="p-4 bg-red-50 text-red-800 rounded border border-red-100">
+      <div className="rounded border border-red-100 bg-red-50 p-4 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
         Failed to load KPIs or unauthorized.
       </div>
     );
@@ -58,7 +58,7 @@ export async function KpiDashboard() {
         <KpiCard title="p99 Latency" value={`${latency.p99}ms`} description="Tail latency" />
       </div>
 
-      <div className="text-xs text-gray-400 text-right">
+      <div className="text-right text-xs text-gray-400 dark:text-gray-500">
         Last updated: {new Date(kpis.updatedAt).toLocaleTimeString()}
       </div>
     </div>

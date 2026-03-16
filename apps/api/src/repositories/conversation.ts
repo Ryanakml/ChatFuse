@@ -124,7 +124,9 @@ const compareByMostRecentMessage = (left: ConversationSummary, right: Conversati
   new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime();
 
 const compareBySlaThenRecency = (left: ConversationSummary, right: ConversationSummary) => {
-  const leftSla = left.slaBreachAt ? new Date(left.slaBreachAt).getTime() : Number.POSITIVE_INFINITY;
+  const leftSla = left.slaBreachAt
+    ? new Date(left.slaBreachAt).getTime()
+    : Number.POSITIVE_INFINITY;
   const rightSla = right.slaBreachAt
     ? new Date(right.slaBreachAt).getTime()
     : Number.POSITIVE_INFINITY;
@@ -201,7 +203,9 @@ export class ConversationRepository {
     }
   }
 
-  private async getLastMessageByConversation(conversationIds: string[]): Promise<Map<string, string>> {
+  private async getLastMessageByConversation(
+    conversationIds: string[],
+  ): Promise<Map<string, string>> {
     const latestMessageAt = new Map<string, string>();
     if (conversationIds.length === 0) {
       return latestMessageAt;
@@ -254,7 +258,9 @@ export class ConversationRepository {
     });
   }
 
-  async listActiveConversations(options: ConversationListOptions = {}): Promise<ConversationSummary[]> {
+  async listActiveConversations(
+    options: ConversationListOptions = {},
+  ): Promise<ConversationSummary[]> {
     const page = normalizePage(options.page);
     const pageSize = normalizePageSize(options.pageSize);
     const rows = await this.listConversationRows({
@@ -275,18 +281,19 @@ export class ConversationRepository {
     const client = getClient();
 
     try {
-      const [messageResult, eventResult] = await Promise.all([
-        client
-          .from('messages')
-          .select('id, conversation_id, direction, sender_type, body, created_at')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true }),
-        client
-          .from('agent_events')
-          .select('id, conversation_id, event_type, payload, created_at')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true }),
-      ]);
+      const messageQuery = client
+        .from('messages')
+        .select('id, conversation_id, direction, sender_type, body, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      const eventQuery = client
+        .from('agent_events')
+        .select('id, conversation_id, event_type, payload, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      const [messageResult, eventResult] = await Promise.all([messageQuery, eventQuery]);
 
       if (messageResult.error) {
         throw toRepositoryError(messageResult.error, 'load conversation messages');
@@ -295,33 +302,33 @@ export class ConversationRepository {
         throw toRepositoryError(eventResult.error, 'load conversation events');
       }
 
-      const messageItems: ConversationTimelineItem[] = ((messageResult.data ?? []) as MessageRow[]).map(
-        (message) => ({
-          type: 'message',
-          id: message.id,
-          conversationId: message.conversation_id,
-          senderRole: mapSenderRole(message.direction, message.sender_type),
-          content: message.body,
-          createdAt: message.created_at,
-        }),
-      );
+      const messageItems: ConversationTimelineItem[] = (
+        (messageResult.data ?? []) as MessageRow[]
+      ).map((message) => ({
+        type: 'message',
+        id: message.id,
+        conversationId: message.conversation_id,
+        senderRole: mapSenderRole(message.direction, message.sender_type),
+        content: message.body,
+        createdAt: message.created_at,
+      }));
 
-      const eventItems: ConversationTimelineItem[] = ((eventResult.data ?? []) as AgentEventRow[]).map(
-        (event) => {
-          const payload = isRecord(event.payload) ? event.payload : {};
-          return {
-            type: 'event',
-            id: event.id,
-            conversationId: event.conversation_id,
-            eventType: mapEventType(event.event_type, payload),
-            details: {
-              sourceEventType: event.event_type,
-              ...payload,
-            },
-            createdAt: event.created_at,
-          };
-        },
-      );
+      const eventItems: ConversationTimelineItem[] = (
+        (eventResult.data ?? []) as AgentEventRow[]
+      ).map((event) => {
+        const payload = isRecord(event.payload) ? event.payload : {};
+        return {
+          type: 'event',
+          id: event.id,
+          conversationId: event.conversation_id,
+          eventType: mapEventType(event.event_type, payload),
+          details: {
+            sourceEventType: event.event_type,
+            ...payload,
+          },
+          createdAt: event.created_at,
+        };
+      });
 
       return [...messageItems, ...eventItems].sort(
         (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
@@ -403,6 +410,7 @@ export class ConversationRepository {
     conversationId: string,
     _operatorId: string,
     content: string,
+    whatsappMessageId?: string | null,
   ): Promise<void> {
     const client = getClient();
 
@@ -411,6 +419,7 @@ export class ConversationRepository {
         conversation_id: conversationId,
         direction: 'outbound',
         sender_type: 'agent',
+        whatsapp_message_id: whatsappMessageId ?? null,
         body: content,
       });
 
@@ -419,6 +428,46 @@ export class ConversationRepository {
       }
     } catch (error: unknown) {
       throw toRepositoryError(error, 'insert operator message');
+    }
+  }
+
+  async getConversationRecipientPhone(conversationId: string): Promise<string> {
+    const client = getClient();
+
+    try {
+      const { data: conversation, error: conversationError } = await client
+        .from('conversations')
+        .select('user_id')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      if (conversationError) {
+        throw toRepositoryError(conversationError, 'load conversation recipient');
+      }
+
+      const userId = conversation?.user_id as string | undefined;
+      if (!userId) {
+        throw new Error(`conversation not found: ${conversationId}`);
+      }
+
+      const { data: user, error: userError } = await client
+        .from('users')
+        .select('phone_number')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (userError) {
+        throw toRepositoryError(userError, 'load recipient phone');
+      }
+
+      const phoneNumber = user?.phone_number as string | undefined;
+      if (!phoneNumber || phoneNumber.trim() === '') {
+        throw new Error(`recipient phone number not found for user: ${userId}`);
+      }
+
+      return phoneNumber;
+    } catch (error: unknown) {
+      throw toRepositoryError(error, 'load conversation recipient phone');
     }
   }
 

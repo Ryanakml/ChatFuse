@@ -3,7 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import type { AppRole } from '@wa-chat/shared';
 
 const supabaseUrl = process.env.SUPABASE_URL || 'http://localhost:54321';
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_KEY || 'dummy';
+const supabaseServiceRoleKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || 'dummy';
 
 // Singleton for API usage
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);

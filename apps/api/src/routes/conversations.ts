@@ -2,6 +2,7 @@ import { Router, type Response } from 'express';
 import { authenticateRequest, requireRole } from '../auth.js';
 import { conversationRepository } from '../repositories/conversation.js';
 import { isDatabaseUnavailableError } from '../repositories/errors.js';
+import { sendWhatsAppTextMessage } from '../services/whatsapp.js';
 
 export const conversationsRouter = Router();
 
@@ -20,12 +21,22 @@ const parsePositiveInteger = (value: unknown): number | undefined => {
   return Math.floor(parsed);
 };
 
+const isUuid = (value: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+const getErrorDetails = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+};
+
 const handleRepositoryError = (res: Response, error: unknown, fallbackMessage: string) => {
   if (isDatabaseUnavailableError(error)) {
     res.status(503).json({ error: 'Database unavailable' });
     return;
   }
-  res.status(500).json({ error: fallbackMessage });
+  res.status(500).json({ error: fallbackMessage, details: getErrorDetails(error) });
 };
 
 conversationsRouter.get('/', async (req, res) => {
@@ -50,33 +61,45 @@ conversationsRouter.get('/escalations', async (req, res) => {
     const list = await conversationRepository.listUnresolvedConversations();
     res.json(list);
   } catch (error) {
+    console.error('Escalations error:', error);
     handleRepositoryError(res, error, 'Failed to fetch escalations');
   }
 });
 
 conversationsRouter.get('/:id/timeline', async (req, res) => {
   try {
-    const timeline = await conversationRepository.getConversationTimeline(req.params.id);
+    const conversationId = req.params.id;
+    console.log('Timeline request received - ID:', conversationId);
+    console.log('Is valid UUID:', isUuid(conversationId));
+    if (!isUuid(conversationId)) {
+      console.error('Invalid UUID format:', conversationId);
+      res.status(400).json({ error: `Invalid conversation id: ${conversationId}` });
+      return;
+    }
+    const timeline = await conversationRepository.getConversationTimeline(conversationId);
+    console.log('Timeline fetched successfully, items:', timeline.length);
     res.json(timeline);
   } catch (error) {
+    console.error('Timeline error:', error);
     handleRepositoryError(res, error, 'Failed to fetch timeline');
   }
 });
 
 conversationsRouter.post('/:id/takeover', async (req, res) => {
   try {
-    // Note: in a real app, operatorId comes from the authenticated x-wa-user header
-    const operatorId = req.header('x-wa-user') || 'unknown';
+    // operatorId comes from the authenticated JWT token via authenticateRequest middleware
+    const operatorId = req.user?.id || 'unknown';
     await conversationRepository.takeoverConversation(req.params.id, operatorId);
     res.json({ success: true });
   } catch (error) {
+    console.error('Takeover error:', error);
     handleRepositoryError(res, error, 'Failed to take over conversation');
   }
 });
 
 conversationsRouter.post('/:id/return', async (req, res) => {
   try {
-    const operatorId = req.header('x-wa-user') || 'unknown';
+    const operatorId = req.user?.id || 'unknown';
     await conversationRepository.returnToBot(req.params.id, operatorId);
     res.json({ success: true });
   } catch (error) {
@@ -86,16 +109,47 @@ conversationsRouter.post('/:id/return', async (req, res) => {
 
 conversationsRouter.post('/:id/messages', async (req, res) => {
   try {
-    const operatorId = req.header('x-wa-user') || 'unknown';
-    const { content } = req.body;
-    if (!content || typeof content !== 'string') {
+    const operatorId = req.user?.id || 'unknown';
+    const contentRaw = req.body?.content;
+    const content = typeof contentRaw === 'string' ? contentRaw.trim() : '';
+    if (!content) {
       res.status(400).json({ error: 'Message content required' });
       return;
     }
-    await conversationRepository.addOperatorMessage(req.params.id, operatorId, content);
 
-    // In a real app we would ALSO broadcast this out to WhatsApp here
-    res.json({ success: true });
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    if (!phoneNumberId || !accessToken) {
+      res.status(500).json({ error: 'WhatsApp outbound is not configured' });
+      return;
+    }
+
+    const recipientPhone = await conversationRepository.getConversationRecipientPhone(req.params.id);
+    const outboundResult = await sendWhatsAppTextMessage({
+      phoneNumberId,
+      accessToken,
+      to: recipientPhone,
+      text: content,
+    });
+
+    try {
+      await conversationRepository.addOperatorMessage(
+        req.params.id,
+        operatorId,
+        content,
+        outboundResult.messageId,
+      );
+    } catch (persistError) {
+      console.error('Manual outbound sent but failed to persist message:', persistError);
+      res.json({
+        success: true,
+        messageId: outboundResult.messageId,
+        persisted: false,
+      });
+      return;
+    }
+
+    res.json({ success: true, messageId: outboundResult.messageId, persisted: true });
   } catch (error) {
     handleRepositoryError(res, error, 'Failed to send message');
   }
