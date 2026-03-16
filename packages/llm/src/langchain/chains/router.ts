@@ -33,7 +33,10 @@ export const routerChain = RunnableBranch.from([
     escalationPath as Runnable,
   ],
   [
-    (state: AgentState) => state.intent === 'CLARIFICATION' || (state.confidence ?? 0) < 0.6,
+    (state: AgentState) =>
+      state.intent === 'CLARIFICATION' ||
+      state.intent === 'GREETING' ||
+      (state.confidence ?? 0) < 0.6,
     clarificationPath as Runnable,
   ],
   [(state: AgentState) => state.intent === 'TOOL', toolPath as Runnable],

@@ -12,7 +12,7 @@ async function runEvals() {
   console.log('Starting RAG Quality Evaluation...');
 
   const llm = new ChatOpenAI({
-    modelName: 'gpt-4o-mini',
+    modelName: 'openai-gpt-4o-mini',
     temperature: 0,
   });
 

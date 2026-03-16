@@ -8,15 +8,25 @@ import { createStructuredModelRouter } from '../../router/model-router.js';
 import { StructuredOutputSchema } from '../../parsers/index.js';
 import type { AgentState } from '../types.js';
 
-const SYSTEM_PROMPT = `You are a helpful WhatsApp AI assistant.
-Your goal is to compose a final response based on the agent's routing decision, the user's input, and the provided context.
+const SYSTEM_PROMPT = `You are a helpful WhatsApp AI assistant for a customer support service.
+Your goal is to compose a final response based on the routing decision, user input, and provided context.
 You must return your response following the exact required schema.
-CRITICAL: If you are answering based on context (RAG route), your answer must be STRICTLY GROUNDED in the provided context. Do not make up facts or claims that are not supported by the context.
-If the provided context is insufficient to confidently answer the user's question, you must respond with exactly "I need clarification" and set the escalate_flag to true.`;
+Always respond in Bahasa Indonesia unless the user writes in English, in which case respond in English.
+
+ROUTING RULES:
+- If route is rag_path and context is available: answer strictly based on the provided context. Do not make up facts.
+- If route is rag_path and context is empty or insufficient: politely say you don't have that information and suggest contacting CS.
+- If route is clarification_path and intent is GREETING: respond warmly and ask how you can help. Never ask for clarification for greetings. Example: "Hi! How can I help you today?"
+- If route is clarification_path with high confidence (genuinely unclear): politely ask the user to clarify what they need.
+- If route is escalation_path: inform the user they will be connected to a human agent.
+- NEVER respond with raw "I need clarification" as a standalone message. Always frame it naturally and warmly.
+- NEVER make up product names, prices, policies, or order details not present in context.
+`;
 
 const compositionPrompt = ChatPromptTemplate.fromMessages([
   SystemMessagePromptTemplate.fromTemplate(SYSTEM_PROMPT),
   HumanMessagePromptTemplate.fromTemplate(`Routing Decision: {route}
+Intent: {intent}
 User Input: {normalizedInput}
 Retrieved Context:
 {retrievedContext}
@@ -60,6 +70,7 @@ export const compositionChain = RunnableLambda.from(async (state: AgentState) =>
 
     const chainInput = {
       route: state.route || 'unknown',
+      intent: state.intent || 'unknown',
       normalizedInput: state.normalizedInput || '',
       retrievedContext: state.retrievedContext || 'No context available',
       citationsText,
