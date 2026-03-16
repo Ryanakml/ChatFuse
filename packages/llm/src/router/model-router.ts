@@ -111,7 +111,7 @@ export interface CostEstimate {
 
 // Very basic cost estimation mapping (could be expanded or moved to config)
 const COST_RATES_PER_1K: Record<string, { input: number; output: number }> = {
-  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
+  'openai-gpt-4o-mini': { input: 0.00015, output: 0.0006 },
   'gemini-2.5-flash': { input: 0.000075, output: 0.0003 }, // Estimate
 };
 

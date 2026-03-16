@@ -14,7 +14,7 @@ describe('calculateResponseCost', () => {
       total_tokens: 150,
     };
 
-    const result = calculateResponseCost(message as AIMessage, 'gpt-4o-mini');
+    const result = calculateResponseCost(message as AIMessage, 'openai-gpt-4o-mini');
 
     expect(result.provider).toBe('openai');
     expect(result.usage.inputTokens).toBe(100);
