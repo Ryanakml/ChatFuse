@@ -1,3 +1,5 @@
+import type { BaseMessage } from '@langchain/core/messages';
+import { getRecentMessages } from '../repositories/message-store.js';
 import { WorkerPermanentError } from '../queue/consumer.js';
 
 export type AgentRunnerInput = {
@@ -69,13 +71,20 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
     );
   }
 
+  const rawHistory = await getRecentMessages(input.conversationId, { limit: 10 });
+  const formattedHistory = rawHistory.map((message) => ({
+    role: message.direction === 'inbound' ? 'user' : 'assistant',
+    content: message.body,
+  })) as unknown as BaseMessage[];
+
   const { processMessage } = await import('@wa-chat/llm');
 
   const state = await processMessage({
     payload: input.message,
     userId: input.sender,
     conversationId: input.conversationId,
-  });
+    history: formattedHistory,
+  } as Parameters<typeof processMessage>[0]);
 
   const toolExecution = (
     state as {

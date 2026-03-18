@@ -193,6 +193,7 @@ const createGroqClient = (): OpenAI => {
 };
 
 const getGroqModel = (): string => readEnv('GROQ_ROUTER_MODEL') ?? DEFAULT_GROQ_MODEL;
+
 const classifyWithGroq = async (params: {
   input: string;
   systemPrompt: string;
@@ -208,20 +209,22 @@ const classifyWithGroq = async (params: {
   }, timeoutMs);
 
   try {
-    const response = await client.responses.create(
+    const response = await client.chat.completions.create(
       {
         model,
-        instructions: params.systemPrompt,
-        input: `Input: "${params.input}"`,
+        messages: [
+          { role: 'system', content: params.systemPrompt },
+          { role: 'user', content: `Input: "${params.input}"` },
+        ],
         temperature: 0,
-        max_output_tokens: params.maxOutputTokens,
+        max_tokens: params.maxOutputTokens,
       },
       {
         signal: controller.signal,
       },
     );
 
-    const outputText = response.output_text?.trim() ?? '';
+    const outputText = response.choices[0]?.message?.content?.trim() ?? '';
     if (!outputText) {
       throw new Error('Empty response from Groq classifier');
     }

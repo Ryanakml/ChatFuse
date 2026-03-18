@@ -6,6 +6,13 @@ type JsonArray = JsonValue[];
 
 let _client: SupabaseClient | null = null;
 
+export type RecentMessage = {
+  id: string;
+  direction: 'inbound' | 'outbound';
+  body: string;
+  createdAt: string | null;
+};
+
 const toJsonValue = (value: unknown): JsonValue => {
   if (value === null) {
     return null;
@@ -210,4 +217,32 @@ export async function insertToolCall(input: {
   if (error) {
     throw new Error(`insertToolCall failed: ${error.message}`);
   }
+}
+
+export async function getRecentMessages(
+  conversationId: string,
+  options?: { limit?: number },
+): Promise<RecentMessage[]> {
+  const client = getClient();
+  const limit = options?.limit ?? 10;
+
+  const { data, error } = await client
+    .from('messages')
+    .select('id, direction, body, created_at')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`getRecentMessages failed: ${error.message}`);
+  }
+
+  const rows = (data ?? []).map((row) => ({
+    id: row.id as string,
+    direction: row.direction as 'inbound' | 'outbound',
+    body: row.body as string,
+    createdAt: (row.created_at as string | null) ?? null,
+  }));
+
+  return rows.reverse();
 }
