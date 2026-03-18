@@ -71,6 +71,7 @@ describe('Integration: Provider Fallback Path (L2)', () => {
       payload: 'how does this work?',
       userId: 'user-fallback-test',
       conversationId: 'conv-fallback-test',
+      history: [],
     });
 
     // Both providers were attempted in sequence
@@ -87,6 +88,7 @@ describe('Integration: Provider Fallback Path (L2)', () => {
       payload: 'track my order 789',
       userId: 'user-fallback-test-2',
       conversationId: 'conv-fallback-test-2',
+      history: [],
     });
 
     expect(typeof state.normalizedInput).toBe('string');
@@ -101,6 +103,7 @@ describe('Integration: Provider Fallback Path (L2)', () => {
       payload: 'tell me something',
       userId: 'user-fallback-test-3',
       conversationId: 'conv-fallback-test-3',
+      history: [],
     });
 
     const openaiIdx = providerCallLog.indexOf('openai');

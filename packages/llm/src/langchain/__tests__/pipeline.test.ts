@@ -53,6 +53,7 @@ describe('LangChain Orchestration Pipeline (G2)', () => {
       payload: 'how does this work?',
       userId: 'user-1',
       conversationId: 'convo-1',
+      history: [],
     });
 
     expect(state.normalizedInput).toBe('how does this work?');
@@ -67,6 +68,7 @@ describe('LangChain Orchestration Pipeline (G2)', () => {
       payload: 'track my order 123',
       userId: 'user-2',
       conversationId: 'convo-2',
+      history: [],
     });
 
     expect(state.normalizedInput).toBe('track my order 123');
@@ -83,6 +85,7 @@ describe('LangChain Orchestration Pipeline (G2)', () => {
       payload: 'talk to a human agent',
       userId: 'user-3',
       conversationId: 'convo-3',
+      history: [],
     });
 
     expect(state.normalizedInput).toBe('talk to a human agent');
@@ -97,6 +100,7 @@ describe('LangChain Orchestration Pipeline (G2)', () => {
       payload: 'this is inappropriate', // To simulate unsafe
       userId: 'user-4',
       conversationId: 'convo-4',
+      history: [],
     });
 
     // In our mock logic, if composedResponse has 'inappropriate', it's unsafe.

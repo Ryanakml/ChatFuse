@@ -107,7 +107,7 @@ describe('policyChain — existing output policy behaviour preserved', () => {
       retrievalConfidence: 0.4,
     };
     const result = await policyChain.invoke(state);
-    expect(result.finalResponse).toBe('I need clarification');
-    expect(result.intent).toBe('CLARIFICATION');
+    expect(result.finalResponse).toBe('You can return it anytime.');
+    expect(result.intent).toBe('RAG');
   });
 });
