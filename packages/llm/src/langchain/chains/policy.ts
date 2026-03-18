@@ -1,7 +1,6 @@
 import { RunnableLambda } from '@langchain/core/runnables';
 import { appMetrics, logger } from '@wa-chat/shared';
 import type { AgentState } from '../types.js';
-import { getRagConfidenceThreshold } from '../config.js';
 import { classifyPolicyWithGroq, type RoutedPolicyAction } from './groq-classifier.js';
 
 /**
@@ -99,7 +98,7 @@ export const policyChain = RunnableLambda.from(async (state: AgentState) => {
       ...state,
       isSafe: true,
       intent: state.intent === 'ESCALATION' ? state.intent : 'CLARIFICATION',
-      finalResponse: 'I need clarification',
+      finalResponse: state.composedResponse || '',
     } as AgentState;
   }
 
@@ -109,15 +108,6 @@ export const policyChain = RunnableLambda.from(async (state: AgentState) => {
   let finalResponse = state.composedResponse || '';
   if (!isSafe) {
     finalResponse = 'I cannot fulfill this request due to policy restrictions.';
-  }
-
-  // Enforce grounded response on low RAG retrieval confidence
-  if (
-    state.intent === 'RAG' &&
-    state.retrievalConfidence !== undefined &&
-    state.retrievalConfidence < getRagConfidenceThreshold()
-  ) {
-    finalResponse = 'I need clarification';
   }
 
   const updatedState = {

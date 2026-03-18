@@ -3,6 +3,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { BaseOutputParser } from '@langchain/core/output_parsers';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { appMetrics } from '@wa-chat/shared';
+import type { BaseMessage } from '@langchain/core/messages';
 import type { AgentState } from './types.js';
 import { normalizationChain } from './chains/normalization.js';
 import { retrievalChain } from './chains/retrieval.js';
@@ -65,13 +66,14 @@ export async function processMessage(input: {
   payload: Record<string, unknown> | string;
   userId: string;
   conversationId: string;
+  history: BaseMessage[];
 }): Promise<AgentState> {
   const initialState: AgentState = {
     originalInput: input.payload,
     context: {
       userId: input.userId,
       conversationId: input.conversationId,
-      history: [],
+      history: input.history || [],
     },
   };
 

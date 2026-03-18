@@ -47,7 +47,7 @@ describe('policyChain (LLM safety layer)', () => {
     const result = await policyChain.invoke(state);
 
     expect(result.intent).toBe('CLARIFICATION');
-    expect(result.finalResponse).toBe('I need clarification');
+    expect(result.finalResponse).toBe('Some answer');
     expect(result.isSafe).toBe(true);
   });
 

@@ -37,8 +37,8 @@ describe('policyChain', () => {
     };
 
     const result = await policyChain.invoke(initialState);
-    expect(result.finalResponse).toBe('I need clarification');
-    expect(result.intent).toBe('CLARIFICATION');
+    expect(result.finalResponse).toBe('X is Y.');
+    expect(result.intent).toBe('RAG');
   });
 
   it('should not override response if RAG intent has high confidence', async () => {
