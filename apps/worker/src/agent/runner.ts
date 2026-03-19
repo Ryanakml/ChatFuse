@@ -77,6 +77,9 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
     content: message.body,
   })) as unknown as BaseMessage[];
 
+  // Debug log to verify history formatting - can be removed in production
+  console.log('🔥 [DEBUG] HISTORY DARI DATABASE:', JSON.stringify(formattedHistory, null, 2));
+
   const { processMessage } = await import('@wa-chat/llm');
 
   const state = await processMessage({
