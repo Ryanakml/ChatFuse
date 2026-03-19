@@ -7,6 +7,7 @@ import {
 import { createStructuredModelRouter } from '../../router/model-router.js';
 import { StructuredOutputSchema } from '../../parsers/index.js';
 import type { AgentState } from '../types.js';
+import type { BaseMessage } from '@langchain/core/messages';
 
 const SYSTEM_PROMPT = `You are a helpful WhatsApp AI assistant for a customer support service.
   Your goal is to compose a final response based on the routing decision, user input, and provided context.
@@ -70,13 +71,26 @@ export const compositionChain = RunnableLambda.from(async (state: AgentState) =>
         ? JSON.stringify(state.citations, null, 2)
         : 'No citations available';
 
-    const history = (state.context?.history ?? []) as { role?: string; content?: string }[];
+    const history = (state.context?.history ?? []) as BaseMessage[];
 
     const formattedChatHistory = history
       .map((msg) => {
-        const role = msg.role === 'user' ? 'User' : 'Assistant';
+        let label: string;
+        switch (msg.type) {
+          case 'human':
+            label = 'User';
+            break;
+          case 'ai':
+            label = 'Assistant';
+            break;
+          case 'system':
+            label = 'System';
+            break;
+          default:
+            label = 'Unknown';
+        }
         const content = typeof msg.content === 'string' ? msg.content : '';
-        return `${role}: ${content}`;
+        return `${label}: ${content}`;
       })
       .join('\n');
 
