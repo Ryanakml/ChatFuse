@@ -39,8 +39,8 @@ const INTENT_ROUTER_SYSTEM_PROMPT = `You are a routing classifier for a WhatsApp
 Return ONLY a JSON object with keys: intent, confidence.
 Valid intents: RAG, TOOL, ESCALATION, CLARIFICATION, GREETING.
 
-- RAG: questions about policy, FAQ, product info, shipping info, return/refund/exchange, how-to, general knowledge questions. Use RAG when the user is asking for information that could be answered from a knowledge base.
-- TOOL: actions requiring live data lookup — order status, shipping estimate, product search, ticket creation. Use TOOL when the user wants to DO something or CHECK something specific.
+- RAG: questions about general policies, FAQs, return/refund procedures, how-to guides. NOT for product search or shipping cost lookup.
+- TOOL: actions requiring live data — order status, product search/availability, shipping cost estimates, ticket creation.
 - ESCALATION: user explicitly asks for a human, agent, manager, or CS. Only use this when unambiguous.
 - CLARIFICATION: genuinely ambiguous input where intent cannot be determined at all. Only use CLARIFICATION with high confidence for truly meaningless input.
 - GREETING: casual openers, greetings, basa-basi with no specific request. Examples: halo, hi, hey, yoo, selamat pagi, assalamualaikum, good morning
@@ -48,13 +48,17 @@ Valid intents: RAG, TOOL, ESCALATION, CLARIFICATION, GREETING.
 Examples:
 - "what is the return policy?" → {"intent": "RAG", "confidence": 0.95}
 - "i want to return the product" → {"intent": "RAG", "confidence": 0.9}
-- "how much is shipping to jakarta?" → {"intent": "RAG", "confidence": 0.85}
 - "check order 12345" → {"intent": "TOOL", "confidence": 0.95}
 - "where is my order?" → {"intent": "TOOL", "confidence": 0.9}
 - "please connect me to a human" → {"intent": "ESCALATION", "confidence": 0.95}
 - "halo" → {"intent": "GREETING", "confidence": 0.95}
 - "yoo" → {"intent": "GREETING", "confidence": 0.95}
 - "xyz lorem ipsum" → {"intent": "CLARIFICATION", "confidence": 0.95}
+- "ada headphone wireless?" → {"intent": "TOOL", "confidence": 0.95}
+- "berapa ongkirnya ke jakarta?" → {"intent": "TOOL", "confidence": 0.95}
+- "how much is shipping to jakarta?" → {"intent": "TOOL", "confidence": 0.95}
+- "barang belum datang 2 minggu" → {"intent": "TOOL", "confidence": 0.95}
+- "apa kebijakan return?" → {"intent": "RAG", "confidence": 0.95}
 
 Do not include any extra text, markdown, or explanations. Output must be valid JSON.`;
 
@@ -63,6 +67,13 @@ Return ONLY a JSON object with keys: toolName, confidence.
 Valid toolName values: order_status_lookup, product_information, shipping_estimate, support_ticket_creation, escalate_to_human, none.
 - Use none when no tool is appropriate.
 - Use escalate_to_human only if the user explicitly requests a human agent.
+
+Examples:
+- "ada headphone wireless?" → {"toolName": "product_information", "confidence": 0.95}
+- "berapa ongkir ke jakarta?" → {"toolName": "shipping_estimate", "confidence": 0.95}
+- "barang belum datang 2 minggu" → {"toolName": "support_ticket_creation", "confidence": 0.9}
+- "cek order saya" → {"toolName": "order_status_lookup", "confidence": 0.95}
+
 Do not include any extra text, markdown, or explanations. Output must be valid JSON.`;
 
 const POLICY_SYSTEM_PROMPT = `You are a safety policy classifier for customer support inputs and outputs.
