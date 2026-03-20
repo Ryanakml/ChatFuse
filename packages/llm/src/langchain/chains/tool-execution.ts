@@ -23,6 +23,24 @@ const extractOrderId = (text: string): string => {
   return match?.[1] ? `ORD-${match[1]}` : 'ORD-12345';
 };
 
+const extractCustomerPhone = (text: string): string => {
+  const match = text.match(/(\+62|08)\d{8,11}/);
+  return match?.[0] ?? '';
+};
+
+const extractDestinationCity = (text: string): string | null => {
+  const cityCandidates = ['Jakarta', 'Surabaya', 'Bandung', 'Medan', 'Bali'] as const;
+  const normalized = text.toLowerCase();
+
+  for (const city of cityCandidates) {
+    if (normalized.includes(city.toLowerCase())) {
+      return city;
+    }
+  }
+
+  return null;
+};
+
 const detectToolFromInput = (normalizedInput: string): ToolSelection | null => {
   const text = normalizedInput.toLowerCase();
 
@@ -31,7 +49,7 @@ const detectToolFromInput = (normalizedInput: string): ToolSelection | null => {
       toolName: 'order_status_lookup',
       toolInput: {
         orderId: extractOrderId(normalizedInput),
-        customerEmail: 'customer@example.com',
+        customerPhone: extractCustomerPhone(normalizedInput),
       },
     };
   }
@@ -46,11 +64,14 @@ const detectToolFromInput = (normalizedInput: string): ToolSelection | null => {
   }
 
   if (/(ongkir|kirim|shipping|delivery|pengiriman)/i.test(text)) {
+    const destinationCity = extractDestinationCity(normalizedInput);
+
     return {
       toolName: 'shipping_estimate',
       toolInput: {
         destinationZipCode: '10110',
         destinationCountry: 'ID',
+        ...(destinationCity ? { destinationCity } : {}),
         weightKg: 1,
       },
     };
@@ -83,11 +104,12 @@ const detectToolFromInput = (normalizedInput: string): ToolSelection | null => {
 const buildToolInput = (
   toolName: ClassifiedToolName,
   normalizedInput: string,
+  state?: AgentState,
 ): Record<string, unknown> => {
   if (toolName === 'order_status_lookup') {
     return {
       orderId: extractOrderId(normalizedInput),
-      customerEmail: 'customer@example.com',
+      customerPhone: extractCustomerPhone(normalizedInput),
     };
   }
 
@@ -98,15 +120,19 @@ const buildToolInput = (
   }
 
   if (toolName === 'shipping_estimate') {
+    const destinationCity = extractDestinationCity(normalizedInput);
+
     return {
       destinationZipCode: '10110',
       destinationCountry: 'ID',
+      ...(destinationCity ? { destinationCity } : {}),
       weightKg: 1,
     };
   }
 
   if (toolName === 'support_ticket_creation') {
     return {
+      conversationId: state?.context?.conversationId ?? '',
       issueDescription: normalizedInput,
       category: 'general',
       priority: 'medium',
@@ -121,6 +147,7 @@ const buildToolInput = (
 
 const classifyToolSelection = async (
   normalizedInput: string,
+  state?: AgentState,
 ): Promise<{ selection: ToolSelection | null; source: 'GROQ' | 'FALLBACK' }> => {
   try {
     const classified = await classifyToolWithGroq(normalizedInput);
@@ -143,7 +170,7 @@ const classifyToolSelection = async (
     return {
       selection: {
         toolName: classified.toolName,
-        toolInput: buildToolInput(classified.toolName, normalizedInput),
+        toolInput: buildToolInput(classified.toolName, normalizedInput, state),
       },
       source: 'GROQ',
     };
@@ -179,7 +206,7 @@ export const toolExecutionChain = RunnableLambda.from(async (state: AgentState) 
   }
 
   const normalizedInput = state.normalizedInput || '';
-  const { selection: detectedTool } = await classifyToolSelection(normalizedInput);
+  const { selection: detectedTool } = await classifyToolSelection(normalizedInput, state);
 
   if (!detectedTool) {
     return {

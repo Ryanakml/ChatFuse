@@ -7,6 +7,10 @@ import {
   ShippingEstimateSchema,
   SupportTicketCreationSchema,
 } from './schemas.js';
+import { lookupOrderByPhone } from './repositories/orders.js';
+import { searchProducts } from './repositories/products.js';
+import { getShippingRules } from './repositories/shipping.js';
+import { createSupportTicket } from './repositories/tickets.js';
 
 export * from './schemas.js';
 export * from './reliability.js';
@@ -47,21 +51,28 @@ const orderStatusCb = new CircuitBreaker({});
 export const orderStatusLookupTool = new DynamicStructuredTool({
   name: 'order_status_lookup',
   description:
-    'Lookup the current status and details of a customer order using the order ID and email.',
+    'Lookup the current status and details of a customer order using the customer phone and optional order ID.',
   schema: OrderStatusLookupSchema,
-  func: async ({ orderId, customerEmail }) => {
+  func: async ({ orderId, customerPhone }) => {
     return withSafeFallback(async () => {
       return orderStatusCb.execute(() =>
         withRetry(() =>
           withTimeout(async () => {
-            // TODO: Implement actual business logic (e.g. calling an internal API or database)
-            // For now, return a mock response
+            const result = await lookupOrderByPhone(customerPhone, orderId);
+
+            if (!result) {
+              return JSON.stringify({
+                found: false,
+                orderId: orderId ?? null,
+                customerPhone,
+                message: 'No matching order was found for this phone number.',
+              });
+            }
+
             return JSON.stringify({
-              orderId,
-              customerEmail,
-              status: 'processing',
-              estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-              message: 'Order is currently being processed and will ship soon.',
+              found: true,
+              order: result.order,
+              shipments: result.shipments,
             });
           }, 5000),
         ),
@@ -80,24 +91,18 @@ export const productInformationTool = new DynamicStructuredTool({
   description:
     'Search for products and retrieve detailed information like price, availability, and specs.',
   schema: ProductInformationSchema,
-  func: async ({ query, category }) => {
+  func: async ({ query, category, limit }) => {
     return withSafeFallback(async () => {
       return productInfoCb.execute(() =>
         withRetry(() =>
           withTimeout(async () => {
-            // TODO: Implement actual business logic
+            const products = await searchProducts(query, category, limit);
             return JSON.stringify({
               query,
               category,
-              results: [
-                {
-                  id: 'PROD-001',
-                  name: 'Wireless Headphones',
-                  price: 99.99,
-                  inStock: true,
-                  description: 'High-quality noise-canceling wireless headphones.',
-                },
-              ],
+              limit: limit ?? 10,
+              count: products.length,
+              results: products,
             });
           }, 5000),
         ),
@@ -115,19 +120,22 @@ export const shippingEstimateTool = new DynamicStructuredTool({
   name: 'shipping_estimate',
   description: 'Calculate standard and express shipping cost and time estimates.',
   schema: ShippingEstimateSchema,
-  func: async ({ destinationZipCode, destinationCountry, weightKg }) => {
+  func: async ({ destinationZipCode, destinationCountry, destinationCity, weightKg }) => {
     return withSafeFallback(async () => {
       return shippingCb.execute(() =>
         withRetry(() =>
           withTimeout(async () => {
-            // TODO: Implement actual business logic
+            const rules = await getShippingRules(destinationCountry, destinationCity, weightKg);
+
             return JSON.stringify({
-              destination: { zipCode: destinationZipCode, country: destinationCountry },
-              options: [
-                { method: 'Standard', cost: 5.99, estimatedDays: '5-7 business days' },
-                { method: 'Express', cost: 14.99, estimatedDays: '1-2 business days' },
-              ],
-              weightKg: weightKg || 1.0,
+              destination: {
+                zipCode: destinationZipCode ?? null,
+                country: destinationCountry,
+                city: destinationCity ?? null,
+              },
+              weightKg: weightKg ?? null,
+              count: rules.length,
+              options: rules,
             });
           }, 5000),
         ),
@@ -145,7 +153,15 @@ export const supportTicketCreationTool = new DynamicStructuredTool({
   name: 'support_ticket_creation',
   description: 'Create a new support ticket for a user issue. This is a write operation.',
   schema: SupportTicketCreationSchema,
-  func: async ({ issueDescription, category, priority, idempotencyKey, confirmed }) => {
+  func: async ({
+    conversationId,
+    issueDescription,
+    category,
+    priority,
+    customerPhone,
+    idempotencyKey,
+    confirmed,
+  }) => {
     if (!confirmed) {
       return `Please confirm that you would like to create a support ticket with the following details:
 - Category: ${category}
@@ -165,19 +181,32 @@ Reply with 'yes' to confirm or 'no' to cancel.`;
                 JSON.stringify({
                   event: 'tool_execution_start',
                   tool: 'support_ticket_creation',
-                  input: { issueDescription, category, priority, idempotencyKey },
+                  input: {
+                    conversationId,
+                    issueDescription,
+                    category,
+                    priority,
+                    customerPhone,
+                    idempotencyKey,
+                  },
                   timestamp: new Date().toISOString(),
                 }),
               );
 
-              // TODO: Implement actual business logic
-              const result = {
-                ticketId: `TICKET-${Math.floor(Math.random() * 10000)}`,
-                status: 'created',
-                issueDescription,
+              const ticket = await createSupportTicket({
+                conversationId,
                 category,
-                priority,
-                idempotencyKey, // Reflecting the key to confirm idempotency handling
+                priority: priority ?? 'medium',
+                issueDescription,
+                ...(customerPhone ? { customerPhone } : {}),
+                ...(idempotencyKey ? { idempotencyKey } : {}),
+              });
+
+              const result = {
+                ticketId: ticket.id,
+                status: ticket.status,
+                priority: ticket.priority,
+                metadata: ticket.metadata,
                 message:
                   'Support ticket successfully created. A human agent will review it shortly.',
               };

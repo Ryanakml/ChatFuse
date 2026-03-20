@@ -321,3 +321,4 @@ export * from './logger.js';
 export * from './telemetry.js';
 export * from './pii.js';
 export * from './secret-rotation.js';
+export * from './internal-tools.js';
