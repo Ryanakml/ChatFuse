@@ -35,6 +35,7 @@ const compositionPrompt = ChatPromptTemplate.fromMessages([
   {retrievedContext}
   Citations Context:
   {citationsText}
+  Tool Output (if any): {toolOutput}
 
   Please provide the best response to the user.`),
 ]);
@@ -57,7 +58,11 @@ const isOpenAiRateLimitError = (error: unknown): boolean => {
  * Forces machine-readable schema using native tool calling and provides an ultimate safe fallback.
  */
 export const compositionChain = RunnableLambda.from(async (state: AgentState) => {
-  if (state.composedResponse && state.composedResponse.trim() !== '') {
+  if (
+    state.composedResponse &&
+    state.composedResponse.trim() !== '' &&
+    state.route !== 'tool_path'
+  ) {
     return state;
   }
 
@@ -101,6 +106,9 @@ export const compositionChain = RunnableLambda.from(async (state: AgentState) =>
       normalizedInput: state.normalizedInput ?? '',
       retrievedContext: state.retrievedContext ?? 'No context available',
       citationsText,
+      toolOutput: state.toolExecution?.toolOutput
+        ? JSON.stringify(state.toolExecution.toolOutput)
+        : 'No tool output',
     };
 
     // Invoke the chain, expecting it to return the z.infer<typeof StructuredOutputSchema> type

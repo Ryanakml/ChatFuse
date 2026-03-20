@@ -46,18 +46,19 @@ describe('compositionChain - Structured Output & Fallbacks', () => {
   });
 
   it('should skip model invocation when composedResponse is already set', async () => {
+    // Should skip only if route is NOT 'tool_path'
     const initialState: AgentState = {
-      originalInput: 'cek status pesanan 12345',
-      normalizedInput: 'cek status pesanan 12345',
-      route: 'tool_path',
-      intent: 'TOOL',
-      composedResponse: 'Tool response already prepared',
+      originalInput: 'halo',
+      normalizedInput: 'halo',
+      route: 'clarification_path',
+      intent: 'GREETING',
+      composedResponse: 'Greeting response already prepared',
     };
 
     const result = await compositionChain.invoke(initialState);
 
     expect(mockRouterInvoke).not.toHaveBeenCalled();
-    expect(result.composedResponse).toBe('Tool response already prepared');
+    expect(result.composedResponse).toBe('Greeting response already prepared');
   });
 
   it('should escalate when escalate_flag is true', async () => {
