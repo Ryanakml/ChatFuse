@@ -26,7 +26,7 @@ export type ProductInformationInput = z.infer<typeof ProductInformationSchema>;
 export const ShippingEstimateSchema = z.object({
   destinationZipCode: z.string().optional().describe('The destination postal or zip code'),
   destinationCountry: z.string().describe('The destination country code (e.g., US, UK, ID)'),
-  destinationCity: z.string().describe('The destination city for the shipment'),
+  destinationCity: z.string().optional().describe('The destination city for the shipment'),
   weightKg: z.number().positive().optional().describe('Optional weight in kilograms'),
 });
 
@@ -39,9 +39,11 @@ export const SupportTicketCreationSchema = z.object({
   customerEmail: z
     .string()
     .email()
+    .optional()
     .describe('The email address of the customer creating the support ticket'),
   customerPhone: z
     .string()
+    .optional()
     .describe(
       'The phone number of the customer creating the support ticket (e.g., +62812... or 0812...)',
     ),
