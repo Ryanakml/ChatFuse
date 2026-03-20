@@ -39,13 +39,19 @@ describe('Tool Contracts and Schemas (I1)', () => {
     });
 
     it('should validate ShippingEstimateSchema correctly', () => {
-      const validPayload = { destinationZipCode: '10001', destinationCountry: 'US', weightKg: 2.5 };
+      const validPayload = {
+        destinationZipCode: '10001',
+        destinationCountry: 'US',
+        destinationCity: 'New York',
+        weightKg: 2.5,
+      };
       const parsed = ShippingEstimateSchema.safeParse(validPayload);
       expect(parsed.success).toBe(true);
 
       const invalidPayload = {
         destinationZipCode: '10001',
         destinationCountry: 'US',
+        destinationCity: 'New York',
         weightKg: -5,
       };
       const parsedInvalid = ShippingEstimateSchema.safeParse(invalidPayload);
@@ -54,6 +60,8 @@ describe('Tool Contracts and Schemas (I1)', () => {
 
     it('should validate SupportTicketCreationSchema correctly', () => {
       const validPayload = {
+        customerEmail: 'customer@example.com',
+        customerPhone: '+628123456789',
         issueDescription: 'My order has not arrived after 2 weeks, please help.',
         category: 'shipping' as const,
         priority: 'high' as const,
@@ -62,6 +70,8 @@ describe('Tool Contracts and Schemas (I1)', () => {
       expect(parsed.success).toBe(true);
 
       const invalidPayloadShortDesc = {
+        customerEmail: 'customer@example.com',
+        customerPhone: '+628123456789',
         issueDescription: 'Help', // min 10 chars
         category: 'shipping' as const,
       };
@@ -92,14 +102,18 @@ describe('Tool Contracts and Schemas (I1)', () => {
       const resultStr = await shippingEstimateTool.invoke({
         destinationZipCode: '12345',
         destinationCountry: 'US',
+        destinationCity: 'Schenectady',
       });
       const result = JSON.parse(resultStr);
       expect(result.destination.zipCode).toBe('12345');
+      expect(result.destination.country).toBe('US');
       expect(result.options.length).toBe(2);
     });
 
     it('supportTicketCreationTool should return mock JSON', async () => {
       const resultStr = await supportTicketCreationTool.invoke({
+        customerEmail: 'customer@example.com',
+        customerPhone: '+628123456789',
         issueDescription: 'This is a valid long description.',
         category: 'general',
         confirmed: true,

@@ -56,6 +56,8 @@ describe('Tool Reliability Integration', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const promise = supportTicketCreationTool.invoke({
+      customerEmail: 'customer@example.com',
+      customerPhone: '+628123456789',
       issueDescription: 'My internet keeps dropping',
       category: 'technical',
       priority: 'high',
@@ -72,11 +74,14 @@ describe('Tool Reliability Integration', () => {
     const parsed = JSON.parse(result as string);
     expect(parsed.idempotencyKey).toBe('idem-12345');
     expect(parsed.issueDescription).toBe('My internet keeps dropping');
+    expect(parsed.category).toBe('technical');
     expect(consoleSpy).toHaveBeenCalledTimes(2); // before and after logs
   });
 
   it('supportTicketCreationTool should request confirmation if not confirmed', async () => {
     const result = await supportTicketCreationTool.invoke({
+      customerEmail: 'customer@example.com',
+      customerPhone: '+628123456789',
       issueDescription: 'My internet keeps dropping',
       category: 'technical',
       priority: 'high',
