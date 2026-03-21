@@ -32,6 +32,45 @@ const escalationKeywords = [
   'agent',
 ];
 
+const isPhoneOnlyInput = (input: string): boolean => /(\+62|08)\d{8,11}/.test(input);
+const isAffirmativeInput = (input: string): boolean =>
+  /^(ya|iya|yes|y|ok|oke|lanjut|silakan|gas)\b/i.test(input.trim());
+
+const getLastAssistantMessage = (state: AgentState): string => {
+  const history = state.context?.history ?? [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (!message) {
+      continue;
+    }
+    if (message.type !== 'ai') {
+      continue;
+    }
+    if (typeof message.content === 'string') {
+      return message.content;
+    }
+  }
+  return '';
+};
+
+const hasPendingToolCue = (state: AgentState): boolean => {
+  const lastAssistantMessage = getLastAssistantMessage(state).toLowerCase();
+  if (!lastAssistantMessage) {
+    return false;
+  }
+
+  const supportConfirmationCue =
+    (lastAssistantMessage.includes('balas dengan') &&
+      (lastAssistantMessage.includes("'ya'") || lastAssistantMessage.includes('konfirmasi'))) ||
+    (lastAssistantMessage.includes('reply with') && lastAssistantMessage.includes("'yes'"));
+
+  const orderRetryCue =
+    (lastAssistantMessage.includes('cari pesanan') && lastAssistantMessage.includes('lagi')) ||
+    lastAssistantMessage.includes('mencari pesanan anda lagi');
+
+  return supportConfirmationCue || orderRetryCue;
+};
+
 export const keywordFallbackIntent = (
   input: string,
 ): Extract<AgentState['intent'], 'RAG' | 'TOOL' | 'ESCALATION' | 'CLARIFICATION'> => {
@@ -64,6 +103,23 @@ export const classificationChain = RunnableLambda.from(async (state: AgentState)
       ...state,
       intent: 'CLARIFICATION',
       confidence: isValidConfidence(state.confidence) ? state.confidence : 0.5,
+    };
+  }
+
+  // Deterministic overrides for short follow-up turns.
+  if (isPhoneOnlyInput(input)) {
+    return {
+      ...state,
+      intent: 'TOOL',
+      confidence: 0.95,
+    };
+  }
+
+  if (isAffirmativeInput(input) && hasPendingToolCue(state)) {
+    return {
+      ...state,
+      intent: 'TOOL',
+      confidence: 0.95,
     };
   }
 
