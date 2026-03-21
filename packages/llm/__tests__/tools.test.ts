@@ -212,7 +212,7 @@ describe('Tool Contracts and Schemas (I1)', () => {
       });
       const result = JSON.parse(resultStr);
       expect(result.status).toBe('open');
-      expect(result.message).toContain('Support ticket successfully created');
+      expect(result.message).toContain('Tiket support berhasil dibuat');
       expect(result.ticketId).toBe('ticket-123');
     });
   });

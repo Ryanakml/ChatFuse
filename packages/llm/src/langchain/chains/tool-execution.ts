@@ -1,6 +1,6 @@
 import { RunnableLambda } from '@langchain/core/runnables';
 import type { StructuredToolInterface } from '@langchain/core/tools';
-import { appMetrics, logger } from '@wa-chat/shared';
+import { appMetrics, logger, normalizeIndonesianPhoneNumber } from '@wa-chat/shared';
 import type { BaseMessage } from '@langchain/core/messages';
 import { businessTools } from '../../tools/index.js';
 import type { AgentState } from '../types.js';
@@ -25,8 +25,12 @@ const extractOrderId = (text: string): string | undefined => {
 };
 
 const extractCustomerPhone = (text: string): string => {
-  const match = text.match(/(\+62|08)\d{8,11}/);
-  return match?.[0] ?? '';
+  const match = text.match(/(?:\+?62|0)?8\d{7,12}/);
+  if (!match?.[0]) {
+    return '';
+  }
+
+  return normalizeIndonesianPhoneNumber(match[0]) ?? match[0];
 };
 
 const isAffirmativeInput = (text: string): boolean =>
@@ -127,11 +131,11 @@ const extractPendingSupportFromLastAssistant = (
   }
 
   const supportCue =
-    (lastAssistantMessage.toLowerCase().includes('balas dengan') &&
-      (lastAssistantMessage.toLowerCase().includes("'ya'") ||
+    (lastAssistantMessage.toLowerCase().includes('balas') &&
+      (lastAssistantMessage.toLowerCase().includes('ya') ||
         lastAssistantMessage.toLowerCase().includes('konfirmasi'))) ||
     (lastAssistantMessage.toLowerCase().includes('reply with') &&
-      lastAssistantMessage.toLowerCase().includes("'yes'"));
+      lastAssistantMessage.toLowerCase().includes('yes'));
 
   if (!supportCue) {
     return null;
@@ -248,7 +252,7 @@ const detectToolFromInput = (normalizedInput: string, state?: AgentState): ToolS
     };
   }
 
-  if (/(ticket|keluhan|komplain|masalah|bantuan teknis|support)/i.test(text)) {
+  if (/(ticket|tiket|keluhan|komplain|masalah|bantuan teknis|support)/i.test(text)) {
     return {
       toolName: 'support_ticket_creation',
       toolInput: {

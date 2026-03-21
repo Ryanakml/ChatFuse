@@ -39,7 +39,7 @@ async function withSafeFallback(
       `[Tool Error] ${toolName} failed:`,
       error instanceof Error ? error.message : error,
     );
-    return `I'm currently unable to complete this action due to a technical issue. Please try again later or type 'escalate' to speak with a human agent.`;
+    return 'Maaf, sistem sedang mengalami kendala teknis. Silakan coba lagi sebentar lagi atau minta bantuan agen manusia.';
   }
 }
 
@@ -163,12 +163,12 @@ export const supportTicketCreationTool = new DynamicStructuredTool({
     confirmed,
   }) => {
     if (!confirmed) {
-      return `Please confirm that you would like to create a support ticket with the following details:
-- Category: ${category}
-- Priority: ${priority || 'medium'}
-- Description: ${issueDescription}
+      return `Mohon konfirmasi pembuatan tiket dengan detail berikut:
+- Kategori: ${category}
+- Prioritas: ${priority || 'medium'}
+- Deskripsi: ${issueDescription}
 
-Reply with 'yes' to confirm or 'no' to cancel.`;
+Balas "ya" untuk konfirmasi atau "tidak" untuk batal.`;
     }
 
     return withSafeFallback(async () => {
@@ -207,8 +207,7 @@ Reply with 'yes' to confirm or 'no' to cancel.`;
                 status: ticket.status,
                 priority: ticket.priority,
                 metadata: ticket.metadata,
-                message:
-                  'Support ticket successfully created. A human agent will review it shortly.',
+                message: 'Tiket support berhasil dibuat. Agen manusia akan menindaklanjuti secepatnya.',
               };
 
               // Log AFTER state
@@ -251,7 +250,7 @@ export const escalateToHumanTool = new DynamicStructuredTool({
         timestamp: new Date().toISOString(),
       }),
     );
-    return 'I have escalated your request to a human support agent. They will review your conversation history and respond to you as soon as possible.';
+    return 'Permintaan Anda sudah saya eskalasikan ke agen customer service manusia. Mohon tunggu, tim kami akan segera membantu.';
   },
 });
 

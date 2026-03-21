@@ -39,9 +39,7 @@ describe('Tool Reliability Integration', () => {
     await vi.runAllTimersAsync();
     const result = await promise;
 
-    expect(result).toContain(
-      "I'm currently unable to complete this action due to a technical issue",
-    );
+    expect(result).toContain('sistem sedang mengalami kendala teknis');
     expect(console.error).toHaveBeenCalled();
   });
 
@@ -136,7 +134,7 @@ describe('Tool Reliability Integration', () => {
       // confirmed is undefined
     });
 
-    expect(result).toContain('Please confirm that you would like to create a support ticket');
+    expect(result).toContain('Mohon konfirmasi pembuatan tiket');
     expect(result).toContain('My internet keeps dropping');
   });
 
@@ -147,7 +145,7 @@ describe('Tool Reliability Integration', () => {
       reason: 'User is very angry',
     });
 
-    expect(result).toContain('I have escalated your request to a human support agent');
+    expect(result).toContain('sudah saya eskalasikan ke agen customer service manusia');
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('escalation_triggered'));
   });
 });

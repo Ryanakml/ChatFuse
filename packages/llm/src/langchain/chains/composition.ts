@@ -141,7 +141,8 @@ export const compositionChain = RunnableLambda.from(async (state: AgentState) =>
     console.error('[Composition Chain] Failed to parse structured output or model failed:', error);
 
     const safeFallback = {
-      content: 'System have some trouble.',
+      content:
+        'Maaf, sistem sedang mengalami kendala. Saya akan bantu eskalasi ke agen manusia agar masalah Anda segera ditangani.',
       confidence: 0,
       escalate_flag: true,
     };

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { conversationRepository, setConversationClient } from './conversation.js';
+import { conversationRepository, setConversationClient } from './conversation.ts';
 
 type UserRow = { id: string; phone_number: string; display_name: string | null };
 type ConversationRow = {
@@ -114,7 +114,7 @@ const makeMockClient = () => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         select: (_columns: string) => ({
           or: (expression: string) => {
-            const termMatch = expression.match(/ilike\.%(.+)%/);
+            const termMatch = expression.match(/ilike\.%([^%]+)%/);
             const term = termMatch?.[1]?.toLowerCase() ?? '';
             const data = users
               .filter(
@@ -304,6 +304,6 @@ describe('ConversationRepository', () => {
     if (timeline[1]?.type !== 'event') {
       throw new Error('Expected timeline item to be an event');
     }
-    expect(timeline[1].eventType).toBe('intent_classification');
+    expect(timeline[1].eventType).toBe('routing_decision');
   });
 });

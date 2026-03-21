@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { normalizeIndonesianPhoneNumber } from '@wa-chat/shared';
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray;
 type JsonObject = { [key: string]: JsonValue };
@@ -12,6 +13,8 @@ export type RecentMessage = {
   body: string;
   createdAt: string | null;
 };
+
+export type ConversationEscalationStatus = 'open' | 'pending' | 'resolved' | null;
 
 const toJsonValue = (value: unknown): JsonValue => {
   if (value === null) {
@@ -55,12 +58,13 @@ export async function upsertUser(input: {
   displayName?: string;
 }): Promise<string> {
   const client = getClient();
+  const normalizedPhone = normalizeIndonesianPhoneNumber(input.phoneNumber) ?? input.phoneNumber.trim();
 
   const { data, error } = await client
     .from('users')
     .upsert(
       {
-        phone_number: input.phoneNumber,
+        phone_number: normalizedPhone,
         display_name: input.displayName ?? null,
         updated_at: new Date().toISOString(),
       },
@@ -143,6 +147,42 @@ export async function insertInboundMessage(input: {
   }
 
   return (data?.id as string | undefined) ?? null;
+}
+
+export async function getConversationEscalationStatus(
+  conversationId: string,
+): Promise<ConversationEscalationStatus> {
+  const client = getClient();
+
+  const { data, error } = await client
+    .from('conversations')
+    .select('escalation_status')
+    .eq('id', conversationId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`getConversationEscalationStatus failed: ${error.message}`);
+  }
+
+  const escalationStatus = data?.escalation_status as ConversationEscalationStatus | undefined;
+  return escalationStatus ?? null;
+}
+
+export async function markConversationEscalated(conversationId: string): Promise<void> {
+  const client = getClient();
+
+  const { error } = await client
+    .from('conversations')
+    .update({
+      status: 'open',
+      escalation_status: 'open',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId);
+
+  if (error) {
+    throw new Error(`markConversationEscalated failed: ${error.message}`);
+  }
 }
 
 export async function insertOutboundMessage(input: {

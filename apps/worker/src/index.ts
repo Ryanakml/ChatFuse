@@ -32,8 +32,10 @@ import {
 } from './queue/consumer.js';
 import { runAgentPipeline, type AgentRunnerResult } from './agent/runner.js';
 import {
+  getConversationEscalationStatus,
   insertAgentEvent,
   insertInboundMessage,
+  markConversationEscalated,
   insertOutboundMessage,
   insertToolCall,
   upsertConversation,
@@ -438,6 +440,12 @@ export const extractOutboundMessageFromIngressPayload = (
 export const buildAutoReplyText = (inboundText: string) =>
   `Terima kasih, pesan kamu sudah kami terima: ${inboundText}`;
 
+export const buildEscalationHoldText = () =>
+  'Percakapan ini sedang ditangani oleh agen customer service manusia. Mohon tunggu sebentar ya.';
+
+const isActiveEscalationStatus = (status: string | null): boolean =>
+  status === 'open' || status === 'pending';
+
 export const sendWhatsAppTextMessage = async (
   input: {
     phoneNumberId: string;
@@ -601,6 +609,8 @@ export const createDefaultProcessor =
       reason: 'default_fallback',
       agentRoute: null,
       provider: null,
+      classifiedIntent: null,
+      classifiedConfidence: null,
       intent: null,
       confidence: null,
       toolName: null,
@@ -610,18 +620,79 @@ export const createDefaultProcessor =
       toolSuccess: null,
     };
 
+    let hasActiveHumanHandoff = false;
+    if (conversationId) {
+      try {
+        const escalationStatus = await getConversationEscalationStatus(conversationId);
+        hasActiveHumanHandoff = isActiveEscalationStatus(escalationStatus);
+      } catch (error: unknown) {
+        logger.error(
+          {
+            event: 'worker.persistence.conversation_status.failed',
+            eventKey: job.eventKey,
+            conversationId,
+            error: error instanceof Error ? error.message : String(error),
+            traceId: job.traceContext?.traceId,
+            correlationId: job.traceContext?.correlationId,
+          },
+          'worker.persistence.conversation_status.failed',
+        );
+      }
+    }
+
     try {
-      const result = await agentRunner({
-        message: outboundMessage.text,
-        conversationId: conversationId ?? outboundMessage.sender,
-        sender: outboundMessage.sender,
-      });
+      if (hasActiveHumanHandoff) {
+        pipelineRoute = 'llm';
+        outboundText = buildEscalationHoldText();
+        pipelineMetadata = {
+          reason: 'active_human_handoff',
+          agentRoute: 'escalation_path',
+          provider: null,
+          classifiedIntent: null,
+          classifiedConfidence: null,
+          intent: 'ESCALATION',
+          confidence: 1,
+          toolName: null,
+          toolInput: null,
+          toolOutput: null,
+          toolDurationMs: null,
+          toolSuccess: null,
+        };
+      } else {
+        const result = await agentRunner({
+          message: outboundMessage.text,
+          conversationId: conversationId ?? outboundMessage.sender,
+          sender: outboundMessage.sender,
+        });
 
-      pipelineRoute = result.route;
-      pipelineMetadata = result.metadata;
+        pipelineRoute = result.route;
+        pipelineMetadata = result.metadata;
 
-      if (result.text.trim() !== '') {
-        outboundText = result.text;
+        if (result.text.trim() !== '') {
+          outboundText = result.text;
+        }
+
+        if (
+          conversationId &&
+          (pipelineMetadata.intent === 'ESCALATION' ||
+            pipelineMetadata.toolName === 'escalate_to_human')
+        ) {
+          try {
+            await markConversationEscalated(conversationId);
+          } catch (error: unknown) {
+            logger.error(
+              {
+                event: 'worker.persistence.escalation_mark.failed',
+                eventKey: job.eventKey,
+                conversationId,
+                error: error instanceof Error ? error.message : String(error),
+                traceId: job.traceContext?.traceId,
+                correlationId: job.traceContext?.correlationId,
+              },
+              'worker.persistence.escalation_mark.failed',
+            );
+          }
+        }
       }
     } catch (error: unknown) {
       const normalizedError = error instanceof Error ? error : new Error(String(error));
@@ -683,6 +754,8 @@ export const createDefaultProcessor =
         errorClass: classifiedError.errorClass,
         agentRoute: null,
         provider: null,
+        classifiedIntent: null,
+        classifiedConfidence: null,
         intent: null,
         confidence: null,
         toolName: null,
@@ -758,6 +831,17 @@ export const createDefaultProcessor =
             durationMs: Date.now() - pipelineStartTime,
             intent: typeof pipelineMetadata.intent === 'string' ? pipelineMetadata.intent : null,
             confidence:
+              typeof pipelineMetadata.confidence === 'number' ? pipelineMetadata.confidence : null,
+            classifiedIntent:
+              typeof pipelineMetadata.classifiedIntent === 'string'
+                ? pipelineMetadata.classifiedIntent
+                : null,
+            classifiedConfidence:
+              typeof pipelineMetadata.classifiedConfidence === 'number'
+                ? pipelineMetadata.classifiedConfidence
+                : null,
+            finalIntent: typeof pipelineMetadata.intent === 'string' ? pipelineMetadata.intent : null,
+            finalConfidence:
               typeof pipelineMetadata.confidence === 'number' ? pipelineMetadata.confidence : null,
           },
         });

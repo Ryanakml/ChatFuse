@@ -126,7 +126,9 @@ describe('compositionChain - Structured Output & Fallbacks', () => {
     expect(mockRouterInvoke).toHaveBeenCalledTimes(2);
 
     // Ultimate Safe Fallback assertions
-    expect(result.composedResponse).toBe('System have some trouble.');
+    expect(result.composedResponse).toBe(
+      'Maaf, sistem sedang mengalami kendala. Saya akan bantu eskalasi ke agen manusia agar masalah Anda segera ditangani.',
+    );
     expect(result.confidence).toBe(0);
     expect(result.intent).toBe('ESCALATION'); // since escalate_flag is true in fallback
   });

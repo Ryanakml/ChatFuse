@@ -1,4 +1,5 @@
 import { getToolsSupabaseClient } from './client.js';
+import { buildIndonesianPhoneLookupCandidates } from '@wa-chat/shared';
 
 export interface InternalOrderShipment {
   id: string;
@@ -42,6 +43,18 @@ export async function lookupOrderByPhone(
   externalOrderId?: string,
 ): Promise<OrderWithShipments | null> {
   const supabaseClient = getToolsSupabaseClient();
+  const phoneCandidates = buildIndonesianPhoneLookupCandidates(customerPhone);
+  const fallbackPhone = customerPhone.trim();
+  const lookupValues =
+    phoneCandidates.length > 0
+      ? phoneCandidates
+      : fallbackPhone
+        ? [fallbackPhone]
+        : [];
+
+  if (lookupValues.length === 0) {
+    return null;
+  }
 
   let query = supabaseClient
     .from('internal_orders')
@@ -73,7 +86,7 @@ export async function lookupOrderByPhone(
       )
       `,
     )
-    .eq('customer_phone', customerPhone)
+    .in('customer_phone', lookupValues)
     .order('placed_at', { ascending: false })
     .limit(1);
 

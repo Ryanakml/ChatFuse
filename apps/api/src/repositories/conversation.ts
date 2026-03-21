@@ -95,8 +95,12 @@ const mapEventType = (
     return 'error';
   }
 
-  if (payload['intent'] || payload['confidence'] !== undefined) {
+  if (eventType.includes('classification')) {
     return 'intent_classification';
+  }
+
+  if (eventType === 'pipeline_success' || eventType === 'routing_decision') {
+    return 'routing_decision';
   }
 
   return 'routing_decision';

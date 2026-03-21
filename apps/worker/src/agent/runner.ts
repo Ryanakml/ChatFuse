@@ -1,4 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { getRecentMessages } from '../repositories/message-store.js';
 import { WorkerPermanentError } from '../queue/consumer.js';
 
@@ -16,6 +16,8 @@ export type AgentRunnerResult = {
     errorClass?: string;
     agentRoute: string | null;
     provider: string | null;
+    classifiedIntent?: string | null;
+    classifiedConfidence?: number | null;
     intent: string | null;
     confidence: number | null;
     toolName: string | null;
@@ -29,29 +31,22 @@ export type AgentRunnerResult = {
 const hasProviderCredential = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim() !== '';
 
-const resolveEnvKey = (
-  primary: string | undefined,
-  fallback: string | undefined,
-): string | undefined => {
-  if (hasProviderCredential(primary)) {
-    return primary;
-  }
+const resolveEnvKey = (...candidates: Array<string | undefined>): string | undefined =>
+  candidates.find((candidate) => hasProviderCredential(candidate));
 
-  if (hasProviderCredential(fallback)) {
-    return fallback;
-  }
-
-  return undefined;
-};
+const toHistoryMessage = (input: { direction: 'inbound' | 'outbound'; body: string }): BaseMessage =>
+  input.direction === 'inbound' ? new HumanMessage(input.body) : new AIMessage(input.body);
 
 export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRunnerResult> => {
   const resolvedOpenAiKey = resolveEnvKey(
     process.env.OPENAI_API_KEY,
     process.env.STAGING_OPENAI_API_KEY,
+    process.env.PROD_OPENAI_API_KEY,
   );
   const resolvedGeminiKey = resolveEnvKey(
     process.env.GEMINI_API_KEY,
     process.env.STAGING_GEMINI_API_KEY,
+    process.env.PROD_GEMINI_API_KEY,
   );
 
   if (resolvedOpenAiKey) {
@@ -72,12 +67,14 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
   }
 
   const rawHistory = await getRecentMessages(input.conversationId, { limit: 10 });
-  const formattedHistory = rawHistory.map((message) => ({
-    role: message.direction === 'inbound' ? 'user' : 'assistant',
-    content: message.body,
-  })) as unknown as BaseMessage[];
+  const formattedHistory = rawHistory.map((message) =>
+    toHistoryMessage({
+      direction: message.direction,
+      body: message.body,
+    }),
+  );
 
-  // Debug log to verify history formatting - can be removed in production
+  // Debug log to verify normalized history formatting
   console.log('🔥 [DEBUG] HISTORY DARI DATABASE:', JSON.stringify(formattedHistory, null, 2));
 
   const { processMessage } = await import('@wa-chat/llm');
@@ -113,6 +110,8 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
       metadata: {
         agentRoute: state.route ?? null,
         provider: null,
+        classifiedIntent: state.classifiedIntent ?? null,
+        classifiedConfidence: state.classifiedConfidence ?? null,
         intent: state.intent ?? null,
         confidence: state.confidence ?? null,
         toolName: toolExecution?.toolName ?? null,
@@ -131,6 +130,8 @@ export const runAgentPipeline = async (input: AgentRunnerInput): Promise<AgentRu
       reason: 'empty_final_response',
       agentRoute: state.route ?? null,
       provider: null,
+      classifiedIntent: state.classifiedIntent ?? null,
+      classifiedConfidence: state.classifiedConfidence ?? null,
       intent: state.intent ?? null,
       confidence: state.confidence ?? null,
       toolName: toolExecution?.toolName ?? null,
