@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { conversationRepository, setConversationClient } from './conversation.ts';
+import { conversationRepository, setConversationClient } from './conversation.js';
 
 type UserRow = { id: string; phone_number: string; display_name: string | null };
 type ConversationRow = {
@@ -140,7 +140,9 @@ const makeMockClient = () => {
 
           const query: {
             in: (column: string, values: string[]) => typeof query;
-            then: (resolve: (value: { data: ConversationRow[]; error: null }) => unknown) => unknown;
+            then: (
+              resolve: (value: { data: ConversationRow[]; error: null }) => unknown,
+            ) => unknown;
           } = {
             in: (column, values) => {
               if (column === 'escalation_status') {
