@@ -111,7 +111,9 @@ const createInMemorySupabaseClient = (): {
     let rowLimit: number | null = null;
 
     const runQuery = (): Array<Record<string, unknown>> => {
-      const filtered = applyFilters(tables[tableName], filters).map((row) => selectColumns(row, columns));
+      const filtered = applyFilters(tables[tableName], filters).map((row) =>
+        selectColumns(row, columns),
+      );
       if (typeof rowLimit === 'number') {
         return filtered.slice(0, rowLimit);
       }
@@ -160,7 +162,10 @@ const createInMemorySupabaseClient = (): {
     values: Record<string, unknown> | Array<Record<string, unknown>>,
   ) => {
     let executed = false;
-    let result: { data: Record<string, unknown> | Record<string, unknown>[] | null; error: unknown } = {
+    let result: {
+      data: Record<string, unknown> | Record<string, unknown>[] | null;
+      error: unknown;
+    } = {
       data: null,
       error: null,
     };
@@ -213,7 +218,7 @@ const createInMemorySupabaseClient = (): {
       }
 
       result = {
-        data: Array.isArray(values) ? insertedRows : insertedRows[0] ?? null,
+        data: Array.isArray(values) ? insertedRows : (insertedRows[0] ?? null),
         error: null,
       };
       return result;
@@ -285,7 +290,9 @@ const createInMemorySupabaseClient = (): {
       const row = cloneRow(values);
       const conflictColumn = options?.onConflict ?? 'phone_number';
       const conflictValue = row[conflictColumn];
-      const existing = tables.users.find((candidate) => candidate[conflictColumn] === conflictValue);
+      const existing = tables.users.find(
+        (candidate) => candidate[conflictColumn] === conflictValue,
+      );
 
       if (existing) {
         Object.assign(existing, row);
@@ -589,7 +596,9 @@ async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
   } catch (error) {
     failed += 1;
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`  ${color.red}✗${color.reset} ${name}\n    ${color.dim}${message}${color.reset}`);
+    console.error(
+      `  ${color.red}✗${color.reset} ${name}\n    ${color.dim}${message}${color.reset}`,
+    );
   }
 }
 
@@ -614,7 +623,11 @@ const main = async () => {
     }): Promise<AgentRunnerResult> => {
       agentInvocations.push(input);
       const queryEmbedding = await embeddingStub.embedQuery(input.message);
-      const ragResult = vectorSearchStub(queryEmbedding, input.message, supabase.tables.knowledge_chunks);
+      const ragResult = vectorSearchStub(
+        queryEmbedding,
+        input.message,
+        supabase.tables.knowledge_chunks,
+      );
 
       if (!ragResult) {
         return {
@@ -708,8 +721,12 @@ const main = async () => {
 
     assert.equal(supabase.tables.users.length, 1, 'users row must be created');
     assert.equal(supabase.tables.conversations.length, 1, 'conversation row must be created');
-    const inboundMessages = supabase.tables.messages.filter((row) => row['direction'] === 'inbound');
-    const outboundMessages = supabase.tables.messages.filter((row) => row['direction'] === 'outbound');
+    const inboundMessages = supabase.tables.messages.filter(
+      (row) => row['direction'] === 'inbound',
+    );
+    const outboundMessages = supabase.tables.messages.filter(
+      (row) => row['direction'] === 'outbound',
+    );
     assert.equal(inboundMessages.length, 1, 'one inbound message row expected');
     assert.equal(outboundMessages.length, 1, 'one outbound message row expected');
     const successEvents = supabase.tables.agent_events.filter(
@@ -720,103 +737,111 @@ const main = async () => {
     assert.equal(payload?.['route'], 'rag_path');
   });
 
-  await runTest('Test B: duplicate webhook is idempotent with exactly one side effect set', async () => {
-    const supabase = createInMemorySupabaseClient();
-    setMessageStoreClient(supabase.client);
+  await runTest(
+    'Test B: duplicate webhook is idempotent with exactly one side effect set',
+    async () => {
+      const supabase = createInMemorySupabaseClient();
+      setMessageStoreClient(supabase.client);
 
-    const agentRunner = async (): Promise<AgentRunnerResult> => ({
-      text: 'Ini jawaban ter-grounded dari agent.',
-      route: 'llm',
-      metadata: buildAgentMetadata({
-        agentRoute: 'rag_path',
-        provider: 'openai',
-        intent: 'RAG',
-        confidence: 0.9,
-      }),
-    });
+      const agentRunner = async (): Promise<AgentRunnerResult> => ({
+        text: 'Ini jawaban ter-grounded dari agent.',
+        route: 'llm',
+        metadata: buildAgentMetadata({
+          agentRoute: 'rag_path',
+          provider: 'openai',
+          intent: 'RAG',
+          confidence: 0.9,
+        }),
+      });
 
-    let outboundSends = 0;
-    const processor = createProcessorWithAgentRunner(
-      {
-        WHATSAPP_PHONE_NUMBER_ID: 'phone-acceptance',
-        WHATSAPP_ACCESS_TOKEN: 'token-acceptance',
-      },
-      async () => {
-        outboundSends += 1;
-        return {
-          ok: true,
-          status: 200,
-          text: async () => '{"messages":[{"id":"wamid.acceptance.outbound.002"}]}',
-        };
-      },
-      agentRunner,
-    );
+      let outboundSends = 0;
+      const processor = createProcessorWithAgentRunner(
+        {
+          WHATSAPP_PHONE_NUMBER_ID: 'phone-acceptance',
+          WHATSAPP_ACCESS_TOKEN: 'token-acceptance',
+        },
+        async () => {
+          outboundSends += 1;
+          return {
+            ok: true,
+            status: 200,
+            text: async () => '{"messages":[{"id":"wamid.acceptance.outbound.002"}]}',
+          };
+        },
+        agentRunner,
+      );
 
-    const harness = await createIngressHarness();
-    try {
-      const payload = JSON.stringify({
-        object: 'whatsapp_business_account',
-        entry: [
-          {
-            changes: [
-              {
-                value: {
-                  messages: [
-                    {
-                      from: '628123456789',
-                      id: 'wamid.acceptance.b.dup001',
-                      timestamp: '1700000400',
-                      text: { body: 'cek kebijakan return' },
-                      type: 'text',
-                    },
-                  ],
+      const harness = await createIngressHarness();
+      try {
+        const payload = JSON.stringify({
+          object: 'whatsapp_business_account',
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    messages: [
+                      {
+                        from: '628123456789',
+                        id: 'wamid.acceptance.b.dup001',
+                        timestamp: '1700000400',
+                        text: { body: 'cek kebijakan return' },
+                        type: 'text',
+                      },
+                    ],
+                  },
+                  field: 'messages',
                 },
-                field: 'messages',
-              },
-            ],
-          },
-        ],
-      });
+              ],
+            },
+          ],
+        });
 
-      const first = await postSignedWebhook({
-        baseUrl: harness.baseUrl,
-        body: payload,
-        secret: 'secret-acceptance',
-      });
-      const second = await postSignedWebhook({
-        baseUrl: harness.baseUrl,
-        body: payload,
-        secret: 'secret-acceptance',
-      });
+        const first = await postSignedWebhook({
+          baseUrl: harness.baseUrl,
+          body: payload,
+          secret: 'secret-acceptance',
+        });
+        const second = await postSignedWebhook({
+          baseUrl: harness.baseUrl,
+          body: payload,
+          secret: 'secret-acceptance',
+        });
 
-      assert.equal(first.status, 200);
-      assert.equal(second.status, 200);
-      assert.equal(harness.enqueuedJobs.length, 1, 'Duplicate webhook must not enqueue a second job');
+        assert.equal(first.status, 200);
+        assert.equal(second.status, 200);
+        assert.equal(
+          harness.enqueuedJobs.length,
+          1,
+          'Duplicate webhook must not enqueue a second job',
+        );
 
-      await runQueuedJobs(harness.enqueuedJobs, processor);
-    } finally {
-      await harness.close();
-    }
+        await runQueuedJobs(harness.enqueuedJobs, processor);
+      } finally {
+        await harness.close();
+      }
 
-    assert.equal(
-      supabase.tables.messages.filter((row) => row['whatsapp_message_id'] === 'wamid.acceptance.b.dup001')
-        .length,
-      1,
-      'Only one inbound DB row should exist for duplicate wamid',
-    );
-    assert.equal(outboundSends, 1, 'Outbound send should happen exactly once');
-    assert.equal(
-      supabase.tables.users.filter((row) => row['phone_number'] === '628123456789').length,
-      1,
-      'users table must contain exactly one row for sender',
-    );
-    const userId = supabase.tables.users[0]?.['id'];
-    assert.equal(
-      supabase.tables.conversations.filter((row) => row['user_id'] === userId).length,
-      1,
-      'conversations table must contain exactly one open conversation for sender',
-    );
-  });
+      assert.equal(
+        supabase.tables.messages.filter(
+          (row) => row['whatsapp_message_id'] === 'wamid.acceptance.b.dup001',
+        ).length,
+        1,
+        'Only one inbound DB row should exist for duplicate wamid',
+      );
+      assert.equal(outboundSends, 1, 'Outbound send should happen exactly once');
+      assert.equal(
+        supabase.tables.users.filter((row) => row['phone_number'] === '+628123456789').length,
+        1,
+        'users table must contain exactly one row for sender',
+      );
+      const userId = supabase.tables.users[0]?.['id'];
+      assert.equal(
+        supabase.tables.conversations.filter((row) => row['user_id'] === userId).length,
+        1,
+        'conversations table must contain exactly one open conversation for sender',
+      );
+    },
+  );
 
   await runTest(
     'Test C: provider fallback still yields pipeline_success and outbound response',
