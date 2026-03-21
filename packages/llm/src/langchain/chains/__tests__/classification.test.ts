@@ -40,8 +40,8 @@ describe('classificationChain (L2 – Unit)', () => {
   it.each([
     ['random gibberish xyz', 'CLARIFICATION'],
     ['', 'CLARIFICATION'],
-    ['hello', 'CLARIFICATION'],
-  ])('classifies "%s" as CLARIFICATION (fallback)', async (input, expected) => {
+    ['hello', 'GREETING'],
+  ])('classifies "%s" using fallback rules', async (input, expected) => {
     expect(await classify(input)).toBe(expected);
   });
 

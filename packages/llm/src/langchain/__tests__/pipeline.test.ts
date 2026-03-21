@@ -29,7 +29,7 @@ vi.mock('../../router/model-router.js', () => {
         } else if (text.includes('Routing Decision: rag_path')) {
           content = '[RAG RESPONSE]';
         } else if (text.includes('Routing Decision: tool_path')) {
-          content = '[TOOL RESPONSE]';
+          content = 'Order status: processing';
         } else {
           // default fallback for clarify / other tests
           content = 'inappropriate';

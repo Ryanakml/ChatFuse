@@ -14,6 +14,8 @@ export interface AgentState {
   retrievalConfidence?: number;
   citations?: Record<string, unknown>[];
   intent?: 'RAG' | 'TOOL' | 'CLARIFICATION' | 'ESCALATION' | 'GREETING' | 'UNKNOWN' | 'BLOCKED';
+  classifiedIntent?: 'RAG' | 'TOOL' | 'CLARIFICATION' | 'ESCALATION' | 'GREETING' | 'UNKNOWN';
+  classifiedConfidence?: number;
   confidence?: number;
   route?: 'rag_path' | 'tool_path' | 'clarification_path' | 'escalation_path';
   composedResponse?: string;

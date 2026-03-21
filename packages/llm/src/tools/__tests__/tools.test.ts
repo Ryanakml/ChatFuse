@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { orderStatusLookupTool, supportTicketCreationTool, escalateToHumanTool } from '../index.js';
 import * as reliability from '../reliability.js';
+import { lookupOrderByPhone } from '../repositories/orders.js';
+import { createSupportTicket } from '../repositories/tickets.js';
+
+vi.mock('../repositories/orders.js', () => ({
+  lookupOrderByPhone: vi.fn(),
+}));
+
+vi.mock('../repositories/tickets.js', () => ({
+  createSupportTicket: vi.fn(),
+}));
 
 describe('Tool Reliability Integration', () => {
   beforeEach(() => {
@@ -23,22 +33,39 @@ describe('Tool Reliability Integration', () => {
 
     const promise = orderStatusLookupTool.invoke({
       orderId: 'ORD-ERR',
-      customerEmail: 'err@example.com',
+      customerPhone: '+628100000001',
     });
 
     await vi.runAllTimersAsync();
     const result = await promise;
 
-    expect(result).toContain(
-      "I'm currently unable to complete this action due to a technical issue",
-    );
+    expect(result).toContain('sistem sedang mengalami kendala teknis');
     expect(console.error).toHaveBeenCalled();
   });
 
   it('orderStatusLookupTool should wrap execution in withRetry and withTimeout', async () => {
+    vi.mocked(lookupOrderByPhone).mockResolvedValueOnce({
+      order: {
+        id: 'order-1',
+        external_order_id: 'ORD-123',
+        customer_phone: '+628100000002',
+        customer_email: null,
+        status: 'processing',
+        payment_status: 'paid',
+        fulfillment_status: 'picking',
+        currency: 'USD',
+        total_amount: 100,
+        placed_at: null,
+        metadata: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      shipments: [],
+    });
+
     const promise = orderStatusLookupTool.invoke({
       orderId: 'ORD-123',
-      customerEmail: 'test@example.com',
+      customerPhone: '+628100000002',
     });
 
     await vi.runAllTimersAsync();
@@ -48,14 +75,32 @@ describe('Tool Reliability Integration', () => {
     expect(reliability.withTimeout).toHaveBeenCalled();
 
     const parsed = JSON.parse(result as string);
-    expect(parsed.orderId).toBe('ORD-123');
-    expect(parsed.status).toBe('processing');
+    expect(parsed.found).toBe(true);
+    expect(parsed.order.external_order_id).toBe('ORD-123');
+    expect(parsed.order.status).toBe('processing');
   });
 
   it('supportTicketCreationTool should accept and reflect idempotencyKey and use wrappers when confirmed', async () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(createSupportTicket).mockResolvedValueOnce({
+      id: 'ticket-123',
+      conversation_id: 'conversation-123',
+      external_ticket_id: null,
+      status: 'open',
+      priority: 'high',
+      metadata: {
+        category: 'technical',
+        issueDescription: 'My internet keeps dropping',
+        idempotencyKey: 'idem-12345',
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
 
     const promise = supportTicketCreationTool.invoke({
+      conversationId: 'conversation-123',
+      customerEmail: 'customer@example.com',
+      customerPhone: '+628123456789',
       issueDescription: 'My internet keeps dropping',
       category: 'technical',
       priority: 'high',
@@ -70,13 +115,18 @@ describe('Tool Reliability Integration', () => {
     expect(reliability.withTimeout).toHaveBeenCalled();
 
     const parsed = JSON.parse(result as string);
-    expect(parsed.idempotencyKey).toBe('idem-12345');
-    expect(parsed.issueDescription).toBe('My internet keeps dropping');
+    expect(parsed.ticketId).toBe('ticket-123');
+    expect(parsed.status).toBe('open');
+    expect(parsed.priority).toBe('high');
+    expect(parsed.metadata.idempotencyKey).toBe('idem-12345');
     expect(consoleSpy).toHaveBeenCalledTimes(2); // before and after logs
   });
 
   it('supportTicketCreationTool should request confirmation if not confirmed', async () => {
     const result = await supportTicketCreationTool.invoke({
+      conversationId: 'conversation-123',
+      customerEmail: 'customer@example.com',
+      customerPhone: '+628123456789',
       issueDescription: 'My internet keeps dropping',
       category: 'technical',
       priority: 'high',
@@ -84,7 +134,7 @@ describe('Tool Reliability Integration', () => {
       // confirmed is undefined
     });
 
-    expect(result).toContain('Please confirm that you would like to create a support ticket');
+    expect(result).toContain('Mohon konfirmasi pembuatan tiket');
     expect(result).toContain('My internet keeps dropping');
   });
 
@@ -95,7 +145,7 @@ describe('Tool Reliability Integration', () => {
       reason: 'User is very angry',
     });
 
-    expect(result).toContain('I have escalated your request to a human support agent');
+    expect(result).toContain('sudah saya eskalasikan ke agen customer service manusia');
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('escalation_triggered'));
   });
 });

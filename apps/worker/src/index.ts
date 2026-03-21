@@ -601,6 +601,8 @@ export const createDefaultProcessor =
       reason: 'default_fallback',
       agentRoute: null,
       provider: null,
+      classifiedIntent: null,
+      classifiedConfidence: null,
       intent: null,
       confidence: null,
       toolName: null,
@@ -683,6 +685,8 @@ export const createDefaultProcessor =
         errorClass: classifiedError.errorClass,
         agentRoute: null,
         provider: null,
+        classifiedIntent: null,
+        classifiedConfidence: null,
         intent: null,
         confidence: null,
         toolName: null,
@@ -758,6 +762,17 @@ export const createDefaultProcessor =
             durationMs: Date.now() - pipelineStartTime,
             intent: typeof pipelineMetadata.intent === 'string' ? pipelineMetadata.intent : null,
             confidence:
+              typeof pipelineMetadata.confidence === 'number' ? pipelineMetadata.confidence : null,
+            classifiedIntent:
+              typeof pipelineMetadata.classifiedIntent === 'string'
+                ? pipelineMetadata.classifiedIntent
+                : null,
+            classifiedConfidence:
+              typeof pipelineMetadata.classifiedConfidence === 'number'
+                ? pipelineMetadata.classifiedConfidence
+                : null,
+            finalIntent: typeof pipelineMetadata.intent === 'string' ? pipelineMetadata.intent : null,
+            finalConfidence:
               typeof pipelineMetadata.confidence === 'number' ? pipelineMetadata.confidence : null,
           },
         });

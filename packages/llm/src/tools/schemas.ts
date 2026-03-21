@@ -4,8 +4,8 @@ import { z } from 'zod';
  * Schema for looking up order status
  */
 export const OrderStatusLookupSchema = z.object({
-  orderId: z.string().describe('The unique identifier for the order (e.g., ORD-12345)'),
-  customerEmail: z.string().email().describe('The email address associated with the order'),
+  customerPhone: z.string().describe('The phone number associated with the order (required)'),
+  orderId: z.string().optional().describe('The unique identifier for the order (e.g., ORD-12345)'),
 });
 
 export type OrderStatusLookupInput = z.infer<typeof OrderStatusLookupSchema>;
@@ -16,6 +16,14 @@ export type OrderStatusLookupInput = z.infer<typeof OrderStatusLookupSchema>;
 export const ProductInformationSchema = z.object({
   query: z.string().describe('Search query, product name, or product ID to look up'),
   category: z.string().optional().describe('Optional category filter for the product search'),
+  productId: z.string().optional().describe('Optional product ID for direct lookup'),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(50)
+    .optional()
+    .describe('Optional limit for number of products returned (1-50)'),
 });
 
 export type ProductInformationInput = z.infer<typeof ProductInformationSchema>;
@@ -24,8 +32,9 @@ export type ProductInformationInput = z.infer<typeof ProductInformationSchema>;
  * Schema for getting shipping estimates
  */
 export const ShippingEstimateSchema = z.object({
-  destinationZipCode: z.string().describe('The destination postal or zip code'),
+  destinationZipCode: z.string().optional().describe('The destination postal or zip code'),
   destinationCountry: z.string().describe('The destination country code (e.g., US, UK, ID)'),
+  destinationCity: z.string().optional().describe('The destination city for the shipment'),
   weightKg: z.number().positive().optional().describe('Optional weight in kilograms'),
 });
 
@@ -35,6 +44,20 @@ export type ShippingEstimateInput = z.infer<typeof ShippingEstimateSchema>;
  * Schema for creating a support ticket
  */
 export const SupportTicketCreationSchema = z.object({
+  customerEmail: z
+    .string()
+    .email()
+    .optional()
+    .describe('The email address of the customer creating the support ticket'),
+  customerPhone: z
+    .string()
+    .optional()
+    .describe(
+      'The phone number of the customer creating the support ticket (e.g., +62812... or 0812...)',
+    ),
+  conversationId: z
+    .string()
+    .describe('Conversation ID to link the support ticket to a chat session'),
   issueDescription: z
     .string()
     .min(10)

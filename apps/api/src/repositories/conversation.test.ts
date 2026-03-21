@@ -114,7 +114,7 @@ const makeMockClient = () => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         select: (_columns: string) => ({
           or: (expression: string) => {
-            const termMatch = expression.match(/ilike\.%(.+)%/);
+            const termMatch = expression.match(/ilike\.%([^%]+)%/);
             const term = termMatch?.[1]?.toLowerCase() ?? '';
             const data = users
               .filter(
@@ -140,7 +140,9 @@ const makeMockClient = () => {
 
           const query: {
             in: (column: string, values: string[]) => typeof query;
-            then: (resolve: (value: { data: ConversationRow[]; error: null }) => unknown) => unknown;
+            then: (
+              resolve: (value: { data: ConversationRow[]; error: null }) => unknown,
+            ) => unknown;
           } = {
             in: (column, values) => {
               if (column === 'escalation_status') {
@@ -304,6 +306,6 @@ describe('ConversationRepository', () => {
     if (timeline[1]?.type !== 'event') {
       throw new Error('Expected timeline item to be an event');
     }
-    expect(timeline[1].eventType).toBe('intent_classification');
+    expect(timeline[1].eventType).toBe('routing_decision');
   });
 });
