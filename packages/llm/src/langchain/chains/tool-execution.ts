@@ -131,11 +131,8 @@ const extractPendingSupportFromLastAssistant = (
   }
 
   const supportCue =
-    (lastAssistantMessage.toLowerCase().includes('balas') &&
-      (lastAssistantMessage.toLowerCase().includes('ya') ||
-        lastAssistantMessage.toLowerCase().includes('konfirmasi'))) ||
-    (lastAssistantMessage.toLowerCase().includes('reply with') &&
-      lastAssistantMessage.toLowerCase().includes('yes'));
+    /balas[\s\S]*["']?ya["']?[\s\S]*(konfirmasi|batal)/i.test(lastAssistantMessage) ||
+    /reply[\s\S]*["']?yes["']?[\s\S]*(confirm|cancel)/i.test(lastAssistantMessage);
 
   if (!supportCue) {
     return null;
