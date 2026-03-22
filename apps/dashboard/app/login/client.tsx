@@ -30,7 +30,7 @@ export default function LoginPageClient() {
       setErrorMsg(error.message);
       setLoading(false);
     } else {
-      router.push('/');
+      router.push('/dashboard');
       router.refresh(); // Refresh the router to update server components with new session
     }
   };
