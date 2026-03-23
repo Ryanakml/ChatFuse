@@ -1,20 +1,29 @@
 import { Router, type Request, type Response } from 'express';
 import { logger } from '@wa-chat/shared';
 import { ingestKnowledge, deleteDocument } from '@wa-chat/llm/dist/rag/ingestion.js';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export const knowledgeRouter = Router();
 
 // Create a Supabase client just for reading the list of documents
-const supaUrl = process.env.SUPABASE_URL as string;
-const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
-const supabase = createClient(supaUrl, supaKey, {
-  auth: { persistSession: false },
-});
+let _supabase: SupabaseClient | null = null;
+const getSupabaseClient = () => {
+  if (!_supabase) {
+    const supaUrl = process.env.SUPABASE_URL as string;
+    const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
+    if (!supaUrl || !supaKey) {
+      throw new Error('Supabase URL and Key are required');
+    }
+    _supabase = createClient(supaUrl, supaKey, {
+      auth: { persistSession: false },
+    });
+  }
+  return _supabase;
+};
 
 knowledgeRouter.get('/', async (_req: Request, res: Response) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('knowledge_documents')
       .select('id, source, title, version, metadata, created_at, updated_at')
       .order('created_at', { ascending: false });

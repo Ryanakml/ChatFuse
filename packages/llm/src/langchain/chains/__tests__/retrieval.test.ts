@@ -6,6 +6,15 @@ vi.mock('../../../rag/embeddings.js', () => ({
     embedQuery: vi.fn().mockResolvedValue([0.1]),
   }),
 }));
+vi.mock('../../../rag/vectorstore.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../rag/vectorstore.js')>();
+  return {
+    ...actual,
+    getVectorStore: vi.fn().mockReturnValue({
+      similaritySearchWithScore: vi.fn().mockResolvedValue([]),
+    }),
+  };
+});
 import type { MockInstance } from 'vitest';
 import { retrievalChain } from '../retrieval.js';
 import * as vectorstoreHooks from '../../../rag/vectorstore.js';
