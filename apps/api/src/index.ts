@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { authenticateRequest, requireRole } from './auth.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { kpisRouter } from './routes/kpis.js';
+import { knowledgeRouter } from './routes/knowledge.js';
 import { logAuditEvent, getAuditEvents } from './repositories/audit.js';
 import { deleteUserData } from './repositories/data-deletion.js';
 import { resolveWorkerRetryPolicy, type WorkerRetryPolicy, validateEnv } from '@wa-chat/config';
@@ -683,6 +684,7 @@ export const createApp = (runtimeEnv: NodeJS.ProcessEnv, options: AppOptions = {
 
   app.use('/api/conversations', conversationsRouter);
   app.use('/api/kpis', kpisRouter);
+  app.use('/api/admin/knowledge', enforceAdminAccess, authenticateRequest, requireRole('admin'), knowledgeRouter);
 
   // --- L1: Admin security routes ---
 

@@ -66,6 +66,24 @@ export async function clearDocumentChunks(documentId: string): Promise<void> {
 }
 
 /**
+ * Delete a document and its associated chunks from the database.
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  // 1. Clear the chunks first due to foreign key constraints
+  await clearDocumentChunks(documentId);
+
+  // 2. Clear the document record
+  const { error } = await supabaseClient
+    .from('knowledge_documents')
+    .delete()
+    .eq('id', documentId);
+
+  if (error) {
+    throw new Error(`Failed to delete knowledge document ${documentId}: ${error.message}`);
+  }
+}
+
+/**
  * Add chunks explicitly into knowledge_chunks with required schema columns.
  * This avoids relying on vector-store metadata mapping for document_id/chunk_index.
  */

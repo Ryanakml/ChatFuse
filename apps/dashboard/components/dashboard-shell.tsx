@@ -36,6 +36,12 @@ export function DashboardShell({ children }: DashboardShellProps) {
               >
                 Escalations
               </Link>
+              <Link
+                href="/knowledge"
+                className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-md transition-colors hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900 font-semibold"
+              >
+                Knowledge Base
+              </Link>
             </nav>
           </div>
           <ThemeToggle />
