@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "npm --workspace @wa-chat/config run build && npm --workspace @wa-chat/shared run build && npm --workspace @wa-chat/llm run build && tsc --noEmit",
-    "test": "npm --workspace @wa-chat/llm run build && node --import tsx src/index.test.ts",
+    "test": "npm --workspace @wa-chat/config run build && npm --workspace @wa-chat/shared run build && npm --workspace @wa-chat/llm run build && node --import tsx src/index.test.ts",
     "start": "node dist/index.js",
     "build": "npm --workspace @wa-chat/config run build && npm --workspace @wa-chat/shared run build && tsc"
   },
