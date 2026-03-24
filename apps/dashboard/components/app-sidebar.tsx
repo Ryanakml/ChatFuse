@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { LayoutDashboard, MessageSquare, AlertTriangle, BookOpen, Briefcase, Command } from "lucide-react";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
-import { ThemeToggle } from "@/components/theme-toggle";
+import * as React from 'react';
+import { LayoutDashboard, MessageSquare, AlertTriangle, BookOpen, Briefcase } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { ThemeToggle } from '@/components/theme-toggle';
 
-import { NavUser } from "@/components/nav-user";
+import { NavUser } from '@/components/nav-user';
 import {
   Sidebar,
   SidebarContent,
@@ -19,62 +19,73 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar";
+} from '@/components/ui/sidebar';
+import { LogoChattiphy } from '@/components/ui/logo-chattiphy';
 
 const navMain = [
   {
-    title: "Dashboard",
-    url: "/dashboard",
+    title: 'Dashboard',
+    url: '/dashboard',
     icon: LayoutDashboard,
   },
   {
-    title: "Conversations",
-    url: "/conversations",
+    title: 'Conversations',
+    url: '/conversations',
     icon: MessageSquare,
   },
   {
-    title: "Escalations",
-    url: "/escalations",
+    title: 'Escalations',
+    url: '/escalations',
     icon: AlertTriangle,
   },
   {
-    title: "Knowledge Base",
-    url: "/knowledge",
+    title: 'Knowledge Base',
+    url: '/knowledge',
     icon: BookOpen,
   },
   {
-    title: "Use Cases",
-    url: "/use-cases",
+    title: 'Use Cases',
+    url: '/use-cases',
     icon: Briefcase,
   },
 ];
 
 const secondaryData: Record<string, { title: string; url: string; teaser?: string }[]> = {
-  Dashboard: [
-    { title: "Overview", url: "/dashboard", teaser: "View KPIs and dashboard insights" },
-  ],
+  Dashboard: [{ title: 'Overview', url: '/dashboard', teaser: 'View KPIs and dashboard insights' }],
   Conversations: [
-    { title: "All Conversations", url: "/conversations", teaser: "View all active and inactive chats" },
+    {
+      title: 'All Conversations',
+      url: '/conversations',
+      teaser: 'View all active and inactive chats',
+    },
   ],
   Escalations: [
-    { title: "Pending Escalations", url: "/escalations", teaser: "Handle user escalations" },
+    { title: 'Pending Escalations', url: '/escalations', teaser: 'Handle user escalations' },
   ],
-  "Knowledge Base": [
-    { title: "Documents", url: "/knowledge", teaser: "Manage RAG documents and data" },
+  'Knowledge Base': [
+    { title: 'Documents', url: '/knowledge', teaser: 'Manage RAG documents and data' },
   ],
-  "Use Cases": [
-    { title: "Prompt Policies", url: "/use-cases", teaser: "Manage use cases and prompt behaviors" },
-  ]
+  'Use Cases': [
+    {
+      title: 'Prompt Policies',
+      url: '/use-cases',
+      teaser: 'Manage use cases and prompt behaviors',
+    },
+  ],
 };
 
-export function AppSidebar({ userEmail, userRole, ...props }: React.ComponentProps<typeof Sidebar> & { userEmail: string; userRole: string; }) {
+export function AppSidebar({
+  userEmail,
+  userRole,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & { userEmail: string; userRole: string }) {
   const pathname = usePathname();
   const { state } = useSidebar();
-  
+
   // Determine active item based on pathname matching
-  const activeItemIndex = navMain.findIndex(item => pathname.startsWith(item.url));
+  const activeItemIndex = navMain.findIndex((item) => pathname.startsWith(item.url));
   const activeItem = (activeItemIndex !== -1 ? navMain[activeItemIndex] : navMain[0])!;
-  
+
   const secondaryItems = secondaryData[activeItem.title] || [];
 
   return (
@@ -84,17 +95,14 @@ export function AppSidebar({ userEmail, userRole, ...props }: React.ComponentPro
       {...props}
     >
       {/* Primary Sidebar - Compact Icons */}
-      <Sidebar
-        collapsible="none"
-        className="w-[calc(var(--sidebar-width-icon)+1px)]! border-r"
-      >
+      <Sidebar collapsible="none" className="w-[calc(var(--sidebar-width-icon)+1px)]! border-r">
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild className="md:h-8 md:p-0">
                 <Link href="/dashboard">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-emerald-600 text-white">
-                    <Command className="size-4" />
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-white">
+                    <LogoChattiphy className="size-6" />
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-medium">WA Chat Ops</span>
@@ -122,10 +130,10 @@ export function AppSidebar({ userEmail, userRole, ...props }: React.ComponentPro
                         className="px-2.5 md:px-2"
                         asChild
                       >
-                         <Link href={item.url}>
-                            <item.icon />
-                            <span>{item.title}</span>
-                         </Link>
+                        <Link href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -135,7 +143,7 @@ export function AppSidebar({ userEmail, userRole, ...props }: React.ComponentPro
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <NavUser user={{ name: userRole, email: userEmail, avatar: "" }} />
+          <NavUser user={{ name: userRole, email: userEmail, avatar: '' }} />
         </SidebarFooter>
       </Sidebar>
 
@@ -143,9 +151,7 @@ export function AppSidebar({ userEmail, userRole, ...props }: React.ComponentPro
       <Sidebar collapsible="none" className="hidden flex-1 md:flex">
         <SidebarHeader className="gap-3.5 border-b p-4">
           <div className="flex w-full items-center justify-between">
-            <div className="text-base font-medium text-foreground">
-              {activeItem?.title}
-            </div>
+            <div className="text-base font-medium text-foreground">{activeItem?.title}</div>
             <ThemeToggle />
           </div>
           <SidebarInput placeholder="Search within..." />
@@ -161,9 +167,9 @@ export function AppSidebar({ userEmail, userRole, ...props }: React.ComponentPro
                 >
                   <span className="font-medium text-foreground">{sItem.title}</span>
                   {sItem.teaser && (
-                   <span className="line-clamp-2 w-full text-xs text-muted-foreground whitespace-break-spaces">
-                     {sItem.teaser}
-                   </span>
+                    <span className="line-clamp-2 w-full text-xs text-muted-foreground whitespace-break-spaces">
+                      {sItem.teaser}
+                    </span>
                   )}
                 </Link>
               ))}
