@@ -1,8 +1,8 @@
 import { getCurrentSession } from '@/lib/supabase/auth';
-import { handleSignOut } from '../actions';
+import { handleSignOut } from '../../actions';
 import { redirect } from 'next/navigation';
 import { KpiDashboard } from '@/components/kpi-dashboard';
-import { DashboardShell } from '@/components/dashboard-shell';
+
 
 export default async function DashboardHome() {
   const session = await getCurrentSession();
@@ -12,7 +12,7 @@ export default async function DashboardHome() {
   }
 
   return (
-    <DashboardShell>
+    <>
       <div className="font-sans">
         <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-800 dark:bg-gray-900">
           <h1 className="text-xl font-semibold">WA Chat Operator Dashboard</h1>
@@ -87,6 +87,6 @@ export default async function DashboardHome() {
           )}
         </main>
       </div>
-    </DashboardShell>
+    </>
   );
 }

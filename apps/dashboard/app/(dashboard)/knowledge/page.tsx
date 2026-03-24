@@ -1,4 +1,4 @@
-import { DashboardShell } from '@/components/dashboard-shell';
+
 import { createClient } from '@/lib/supabase/server';
 import { KnowledgeForm } from './components/knowledge-form';
 import { DeleteButton } from './components/delete-button';
@@ -24,7 +24,7 @@ export default async function KnowledgePage() {
   }
 
   return (
-    <DashboardShell>
+    <>
       <main className="flex-1 p-6 lg:p-8">
         <div className="mx-auto max-w-6xl space-y-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between">
@@ -79,6 +79,6 @@ export default async function KnowledgePage() {
           </div>
         </div>
       </main>
-    </DashboardShell>
+    </>
   );
 }

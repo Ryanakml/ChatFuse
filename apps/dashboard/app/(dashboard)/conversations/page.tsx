@@ -1,7 +1,7 @@
 import type { ConversationSummary } from '@wa-chat/shared';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { DashboardShell } from '@/components/dashboard-shell';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +42,7 @@ export default async function ConversationsPage() {
   const conversations = await getConversations();
 
   return (
-    <DashboardShell>
+    <>
       <div className="mx-auto max-w-5xl space-y-6 p-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Conversations</h1>
@@ -97,6 +97,6 @@ export default async function ConversationsPage() {
           </ul>
         </div>
       </div>
-    </DashboardShell>
+    </>
   );
 }
