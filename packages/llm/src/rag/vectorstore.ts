@@ -1,21 +1,31 @@
 import { SupabaseVectorStore } from '@langchain/community/vectorstores/supabase';
 import { Embeddings } from '@langchain/core/embeddings';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { KnowledgeDocument } from '@wa-chat/shared';
 import { Document } from '@langchain/core/documents';
 import { getEmbeddings } from './embeddings.js';
 
-const supaUrl = process.env.SUPABASE_URL as string;
-const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
+let _supabaseClient: SupabaseClient | null = null;
 
-// Ensure we have a singleton supabase client for the vector store
-export const supabaseClient = createClient(supaUrl, supaKey, {
-  auth: { persistSession: false },
-});
+export const getSupabaseClient = () => {
+  if (!_supabaseClient) {
+    const supaUrl = process.env.SUPABASE_URL;
+    const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supaUrl || !supaKey) {
+      throw new Error(
+        'Missing required environment variables: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY',
+      );
+    }
+    _supabaseClient = createClient(supaUrl, supaKey, {
+      auth: { persistSession: false },
+    });
+  }
+  return _supabaseClient;
+};
 
 export const getVectorStore = (embeddings: Embeddings) => {
   return new SupabaseVectorStore(embeddings, {
-    client: supabaseClient,
+    client: getSupabaseClient(),
     tableName: 'knowledge_chunks',
     queryName: 'match_knowledge_chunks', // Supabase function name for retrieval (not part of H1 but standard)
   });
@@ -29,7 +39,7 @@ export const getVectorStore = (embeddings: Embeddings) => {
 export async function singleDocumentUpsert(
   doc: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<KnowledgeDocument> {
-  const { data, error } = await supabaseClient
+  const { data, error } = await getSupabaseClient()
     .from('knowledge_documents')
     .upsert(
       {
@@ -55,13 +65,31 @@ export async function singleDocumentUpsert(
  * Delete existing chunks for a document to cleanly replace them.
  */
 export async function clearDocumentChunks(documentId: string): Promise<void> {
-  const { error } = await supabaseClient
+  const { error } = await getSupabaseClient()
     .from('knowledge_chunks')
     .delete()
     .eq('document_id', documentId);
 
   if (error) {
     throw new Error(`Failed to clear knowledge chunks for doc ${documentId}: ${error.message}`);
+  }
+}
+
+/**
+ * Delete a document and its associated chunks from the database.
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  // 1. Clear the chunks first due to foreign key constraints
+  await clearDocumentChunks(documentId);
+
+  // 2. Clear the document record
+  const { error } = await getSupabaseClient()
+    .from('knowledge_documents')
+    .delete()
+    .eq('id', documentId);
+
+  if (error) {
+    throw new Error(`Failed to delete knowledge document ${documentId}: ${error.message}`);
   }
 }
 
@@ -93,7 +121,7 @@ export async function addChunksToVectorStore(
     };
   });
 
-  const { error } = await supabaseClient
+  const { error } = await getSupabaseClient()
     .from('knowledge_chunks')
     .upsert(rows, { onConflict: 'document_id,chunk_index', ignoreDuplicates: false });
 

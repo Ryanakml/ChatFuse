@@ -6,9 +6,10 @@ import {
   singleDocumentUpsert,
   clearDocumentChunks,
   addChunksToVectorStore,
+  deleteDocument,
 } from './vectorstore.js';
 
-export { singleDocumentUpsert, clearDocumentChunks, addChunksToVectorStore };
+export { singleDocumentUpsert, clearDocumentChunks, addChunksToVectorStore, deleteDocument };
 
 /**
  * Parses and loads documents based on type.
