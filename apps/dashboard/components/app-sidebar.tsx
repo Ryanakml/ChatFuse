@@ -1,7 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { LayoutDashboard, MessageSquare, AlertTriangle, BookOpen, Briefcase } from 'lucide-react';
+import {
+  LayoutDashboard,
+  MessageSquare,
+  AlertTriangle,
+  BookOpen,
+  Briefcase,
+  Wrench,
+} from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -44,6 +51,11 @@ const navMain = [
     icon: BookOpen,
   },
   {
+    title: 'Tools',
+    url: '/tools',
+    icon: Wrench,
+  },
+  {
     title: 'Use Cases',
     url: '/use-cases',
     icon: Briefcase,
@@ -80,13 +92,20 @@ export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar> & { userEmail: string; userRole: string }) {
   const pathname = usePathname();
-  const { state } = useSidebar();
+  useSidebar();
 
   // Determine active item based on pathname matching
-  const activeItemIndex = navMain.findIndex((item) => pathname.startsWith(item.url));
+  const activeItemIndex = navMain.findIndex((item) => {
+    if (item.url === '/dashboard') {
+      return pathname === '/dashboard' || pathname === '/';
+    }
+    return pathname.startsWith(item.url);
+  });
   const activeItem = (activeItemIndex !== -1 ? navMain[activeItemIndex] : navMain[0])!;
 
   const secondaryItems = secondaryData[activeItem.title] || [];
+  const showSecondary =
+    pathname.startsWith('/conversations') || pathname.startsWith('/escalations');
 
   return (
     <Sidebar
@@ -94,19 +113,18 @@ export function AppSidebar({
       className="overflow-hidden *:data-[sidebar=sidebar]:flex-row"
       {...props}
     >
-      {/* Primary Sidebar - Compact Icons */}
-      <Sidebar collapsible="none" className="w-[calc(var(--sidebar-width-icon)+1px)]! border-r">
+      {/* Primary Sidebar - Expanded by Default */}
+      <Sidebar collapsible="none" className="border-r">
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild className="md:h-8 md:p-0">
                 <Link href="/dashboard">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-white">
-                    <LogoChattiphy className="size-6" />
+                  <div className="flex items-center justify-center rounded-lg bg-transparent px-1">
+                    <LogoChattiphy className="h-6 w-auto max-w-[120px]" />
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-medium">WA Chat Ops</span>
-                    <span className="truncate text-xs">Internal Panel</span>
                   </div>
                 </Link>
               </SidebarMenuButton>
@@ -117,27 +135,35 @@ export function AppSidebar({
           <SidebarGroup>
             <SidebarGroupContent className="px-1.5 md:px-0">
               <SidebarMenu>
-                {navMain.map((item) => {
-                  const isActive = pathname.startsWith(item.url);
-                  return (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        tooltip={{
-                          children: item.title,
-                          hidden: false,
-                        }}
-                        isActive={isActive}
-                        className="px-2.5 md:px-2"
-                        asChild
-                      >
-                        <Link href={item.url}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {navMain
+                  .filter((item) => item.title !== 'Use Cases')
+                  .map((item) => {
+                    let isActive = false;
+                    if (item.url === '/dashboard') {
+                      isActive = pathname === '/dashboard' || pathname === '/';
+                    } else {
+                      isActive = pathname.startsWith(item.url);
+                    }
+
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          tooltip={{
+                            children: item.title,
+                            hidden: false,
+                          }}
+                          isActive={isActive}
+                          className="px-2.5 md:px-2"
+                          asChild
+                        >
+                          <Link href={item.url}>
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -148,35 +174,37 @@ export function AppSidebar({
       </Sidebar>
 
       {/* Secondary Sidebar - Section Nav */}
-      <Sidebar collapsible="none" className="hidden flex-1 md:flex">
-        <SidebarHeader className="gap-3.5 border-b p-4">
-          <div className="flex w-full items-center justify-between">
-            <div className="text-base font-medium text-foreground">{activeItem?.title}</div>
-            <ThemeToggle />
-          </div>
-          <SidebarInput placeholder="Search within..." />
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup className="px-0">
-            <SidebarGroupContent>
-              {secondaryItems.map((sItem) => (
-                <Link
-                  href={sItem.url}
-                  key={sItem.title}
-                  className="flex flex-col items-start gap-2 border-b p-4 text-sm leading-tight whitespace-nowrap last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                >
-                  <span className="font-medium text-foreground">{sItem.title}</span>
-                  {sItem.teaser && (
-                    <span className="line-clamp-2 w-full text-xs text-muted-foreground whitespace-break-spaces">
-                      {sItem.teaser}
-                    </span>
-                  )}
-                </Link>
-              ))}
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
+      {showSecondary && (
+        <Sidebar collapsible="none" className="hidden flex-1 md:flex">
+          <SidebarHeader className="gap-3.5 border-b p-4">
+            <div className="flex w-full items-center justify-between">
+              <div className="text-base font-medium text-foreground">{activeItem?.title}</div>
+              <ThemeToggle />
+            </div>
+            <SidebarInput placeholder="Search within..." />
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarGroup className="px-0">
+              <SidebarGroupContent>
+                {secondaryItems.map((sItem) => (
+                  <Link
+                    href={sItem.url}
+                    key={sItem.title}
+                    className="flex flex-col items-start gap-2 border-b p-4 text-sm leading-tight whitespace-nowrap last:border-b-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  >
+                    <span className="font-medium text-foreground">{sItem.title}</span>
+                    {sItem.teaser && (
+                      <span className="line-clamp-2 w-full text-xs text-muted-foreground whitespace-break-spaces">
+                        {sItem.teaser}
+                      </span>
+                    )}
+                  </Link>
+                ))}
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+        </Sidebar>
+      )}
     </Sidebar>
   );
 }
