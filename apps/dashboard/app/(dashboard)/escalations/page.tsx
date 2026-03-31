@@ -1,7 +1,7 @@
 import type { ConversationSummary } from '@wa-chat/shared';
 import { createClient } from '@/lib/supabase/server';
 import { EscalationRow } from './EscalationRow';
-import { DashboardShell } from '@/components/dashboard-shell';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +40,7 @@ export default async function EscalationsPage() {
   const escalations = await getEscalations();
 
   return (
-    <DashboardShell>
+    <>
       <div className="mx-auto max-w-5xl space-y-6 p-8">
         <div className="flex items-center justify-between">
           <div>
@@ -67,6 +67,6 @@ export default async function EscalationsPage() {
           </ul>
         </div>
       </div>
-    </DashboardShell>
+    </>
   );
 }

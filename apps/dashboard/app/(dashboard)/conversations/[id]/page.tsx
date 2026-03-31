@@ -1,7 +1,7 @@
 import { ConversationTimelineItem, ConversationSummary } from '@wa-chat/shared';
 import { createClient } from '@/lib/supabase/server';
 import { ConversationActions } from './ConversationActions';
-import { DashboardShell } from '@/components/dashboard-shell';
+
 
 const apiUrl = process.env.API_URL;
 
@@ -75,14 +75,14 @@ export default async function ConversationDetailPage({
 
   if (!summary) {
     return (
-      <DashboardShell>
+      <>
         <div className="p-8 text-center text-red-500 dark:text-red-300">Conversation not found</div>
-      </DashboardShell>
+      </>
     );
   }
 
   return (
-    <DashboardShell>
+    <>
       <div className="mx-auto max-w-4xl py-8">
         <div className="mb-6 flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900">
           <div>
@@ -157,6 +157,6 @@ export default async function ConversationDetailPage({
 
         <ConversationActions conversationId={summary.id} botActive={summary.botActive} />
       </div>
-    </DashboardShell>
+    </>
   );
 }

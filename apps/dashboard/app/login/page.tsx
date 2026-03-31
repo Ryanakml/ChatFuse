@@ -5,11 +5,12 @@ export const metadata = {
   title: 'Login - WA Chat Operator Dashboard',
 };
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { message?: string; error?: string };
+  searchParams: Promise<{ message?: string; error?: string }>;
 }) {
+  const params = await searchParams;
   return (
     <div
       className="flex h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950"
@@ -55,15 +56,15 @@ export default function LoginPage({
           WA Chat Login
         </h1>
 
-        {searchParams?.error && (
+        {params?.error && (
           <div className="mb-4 rounded bg-red-100 p-3 text-red-700 dark:bg-red-950/40 dark:text-red-200">
-            {searchParams.error}
+            {params.error}
           </div>
         )}
 
-        {searchParams?.message && (
+        {params?.message && (
           <div className="mb-4 rounded bg-green-100 p-3 text-green-700 dark:bg-green-950/40 dark:text-green-200">
-            {searchParams.message}
+            {params.message}
           </div>
         )}
 

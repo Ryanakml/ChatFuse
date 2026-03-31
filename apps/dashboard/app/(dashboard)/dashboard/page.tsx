@@ -1,8 +1,7 @@
 import { getCurrentSession } from '@/lib/supabase/auth';
-import { handleSignOut } from '../actions';
 import { redirect } from 'next/navigation';
 import { KpiDashboard } from '@/components/kpi-dashboard';
-import { DashboardShell } from '@/components/dashboard-shell';
+
 
 export default async function DashboardHome() {
   const session = await getCurrentSession();
@@ -12,25 +11,14 @@ export default async function DashboardHome() {
   }
 
   return (
-    <DashboardShell>
+    <>
       <div className="font-sans">
         <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-800 dark:bg-gray-900">
           <h1 className="text-xl font-semibold">WA Chat Operator Dashboard</h1>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              {session.email}
-            </span>
             <span className="rounded-full border border-gray-200 bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
               {session.role || 'No Role'}
             </span>
-            <form action={handleSignOut}>
-              <button
-                type="submit"
-                className="rounded border border-transparent px-3 py-1 text-sm text-red-600 transition-colors hover:border-red-200 hover:text-red-700 dark:text-red-400 dark:hover:border-red-900 dark:hover:text-red-300"
-              >
-                Sign Out
-              </button>
-            </form>
           </div>
         </header>
 
@@ -87,6 +75,6 @@ export default async function DashboardHome() {
           )}
         </main>
       </div>
-    </DashboardShell>
+    </>
   );
 }
